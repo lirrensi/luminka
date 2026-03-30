@@ -1,0 +1,168 @@
+/* FILE: examples/kanban/dist/style.css
+PURPOSE: Style the Luminka kanban example board and editing controls.
+OWNS: Kanban example layout and visual presentation.
+DOCS: docs/spec.md, docs/arch.md, agent_chat/plan_luminka_phase3_surface_examples_2026-03-30.md
+*/
+
+:root {
+  color-scheme: light dark;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, #1e293b, #020617 65%);
+  color: #e2e8f0;
+}
+
+.shell {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 32px;
+}
+
+.hero,
+.status-grid {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.hero {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.status-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.panel {
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid #334155;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.actions,
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.7rem 1rem;
+  background: #fbbf24;
+  color: #3f2d00;
+  cursor: pointer;
+}
+
+pre,
+.badge {
+  border: 1px solid #334155;
+  background: #020617;
+  color: #e2e8f0;
+}
+
+pre {
+  margin: 0;
+  padding: 12px;
+  border-radius: 12px;
+  white-space: pre-wrap;
+}
+
+.badge {
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 999px;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.column {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.column-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.column h3,
+.panel h2 {
+  margin: 0;
+}
+
+.cards {
+  display: grid;
+  gap: 10px;
+}
+
+.card {
+  background: #020617;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 10px;
+}
+
+.card-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #94a3b8;
+  font-size: 0.875rem;
+}
+
+.card input {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 10px 12px;
+}
+
+.events {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.events li {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #020617;
+}
+
+.lede {
+  margin: 8px 0 0;
+  color: #94a3b8;
+}

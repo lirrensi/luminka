@@ -1,0 +1,15 @@
+{
+    "name": "luminka",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build:sdk": "tsx scripts/build_sdk.ts",
+        "build:starter": "npm run build:sdk",
+        "build:examples": "npm run build:sdk",
+        "build:all": "npm run build:sdk"
+    },
+    "devDependencies": {
+        "tsx": "^4.21.0",
+        "typescript": "^5.9.3"
+    }
+}
