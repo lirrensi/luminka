@@ -70,11 +70,27 @@ It gives you:
 
 ## Start here
 
-If you are new to the repo, use this order:
+Luminka has two common adoption paths:
+
+### 1) Clone the starter
+
+If you want the canonical scaffold, use this order:
 
 1. Read this README.
 2. Follow [`docs/onboarding.md`](docs/onboarding.md).
 3. Start from `starter/` unless you specifically want an example.
+
+### 2) Import Luminka as a Go module
+
+If you already have your own app and do not want to copy this repo first, use Luminka as a Git-based Go dependency from [`github.com/lirrensi/luminka`](https://github.com/lirrensi/luminka).
+
+In that flow:
+
+- keep your own frontend project separate,
+- compile your own SDK outputs separately,
+- and embed the generated `luminka.js` files in your app build.
+
+The SDK source of truth is [`luminka/sdk/luminka.ts`](luminka/sdk/luminka.ts), and `npm run build:sdk` regenerates the browser-ready copies.
 
 ## Which app should I open?
 
@@ -96,7 +112,7 @@ If you are new to the repo, use this order:
 
 - **CGO enabled**
 - a working **native C/C++ toolchain** for your platform
-- native libraries required by `github.com/webview/webview_go`
+- native libraries required by [`github.com/webview/webview_go`](https://github.com/webview/webview_go)
 - on **Windows**, webview builds typically expect **Microsoft Edge WebView2** to be available at runtime
 
 If you want the lowest-friction first run, start with a **browser build**.
