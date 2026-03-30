@@ -22,6 +22,24 @@ It is meant for the “I just want to bundle this web app and run it anywhere”
 
 If you need more power, you bring it yourself through scripts like Python, TypeScript, PowerShell, or Bash.
 
+## What this is / how it works
+
+Luminka is a way to turn your web app into a portable `.exe` without cloning a big desktop shell.
+
+The flow is simple:
+
+1. **Clone the starter** or **import Luminka as a Go module** in your own repo.
+2. Build your frontend however you want.
+3. Put the built static files in the expected `dist/` folder.
+4. Compile the Go app.
+5. Run the resulting `.exe` anywhere you want.
+
+If you import Luminka directly, rebuild the SDK copies with `npm run build:sdk` so your frontend and embedded runtime stay in sync.
+
+If you want runtime access to the filesystem, bundled scripts, or shell commands, use the Luminka SDK to talk to the host and enable the capabilities you need.
+
+That is the point: keep your frontend stack, package it into one portable app, and add local power only when you want it.
+
 ### 🆚 Compared with Wails
 
 - Wails is broader and more framework-like.
