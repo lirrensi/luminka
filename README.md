@@ -38,6 +38,10 @@ If you import Luminka directly, rebuild the SDK copies with `npm run build:sdk` 
 
 If you want runtime access to the filesystem, bundled scripts, or shell commands, use the Luminka SDK to talk to the host and enable the capabilities you need.
 
+The current bridge uses a binary WebSocket protocol with a JSON header plus raw payload bytes. That keeps file changes and stream chunks byte-accurate instead of forcing everything through text encoding.
+
+If your app has any direct ties to the earlier protocol shape, treat this as a standalone v2 update: rebuild or rewrite the mini-app against the current SDK rather than trying to carry the old wiring forward.
+
 That is the point: keep your frontend stack, package it into one portable app, and add local power only when you want it.
 
 ### 🆚 Compared with Wails
@@ -344,3 +348,4 @@ If you are onboarding a new developer, have them prove the browser build first.
 - [`docs/spec.md`](docs/spec.md) — behavior and protocol spec
 - [`docs/arch.md`](docs/arch.md) — repository and runtime architecture
 - [`docs/glossary.md`](docs/glossary.md) — canonical terms
+- [`CHANGELOG.md`](CHANGELOG.md) — release notes and protocol updates
