@@ -11,6 +11,7 @@ package luminka
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -91,6 +93,108 @@ func (sb *ScriptBridge) Exec(runner string, file string, args []string, timeout 
 		code = exitErr.ExitCode()
 	}
 	return stdout, stderr, code, err
+}
+
+func (sb *ScriptBridge) ExecStream(rt *Runtime, conn *wsConnection, id json.RawMessage, runner string, file string, args []string, timeout time.Duration) error {
+	if sb == nil {
+		return errors.New("script bridge is required")
+	}
+	if rt == nil {
+		return errors.New("runtime is required")
+	}
+	if conn == nil {
+		return errors.New("websocket connection is required")
+	}
+	if runner == "" {
+		return errors.New("runner is required")
+	}
+	if file == "" {
+		return errors.New("file is required")
+	}
+
+	resolvedFile, cleanup, err := sb.resolveScriptFile(file)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	info, err := os.Stat(resolvedFile)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return errors.New("file is required")
+	}
+
+	resolvedTimeout := timeout
+	if resolvedTimeout <= 0 {
+		resolvedTimeout = sb.defaultTimeout
+	}
+	ctx := context.Background()
+	var cancel context.CancelFunc = func() {}
+	if resolvedTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, resolvedTimeout)
+	}
+	defer cancel()
+
+	cmdArgs := append([]string{resolvedFile}, args...)
+	cmd := exec.CommandContext(ctx, runner, cmdArgs...)
+	cmd.Dir = sb.root
+
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	if rt.streams == nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return errors.New("stream registry is unavailable")
+	}
+	stream := rt.streams.registerProcessOutput(conn)
+	if stream == nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return errors.New("stream registry is unavailable")
+	}
+	defer rt.streams.remove(stream.id)
+
+	writer := newExecStreamWriter(conn, stream.id)
+	var wg sync.WaitGroup
+	errCh := make(chan error, 2)
+	wg.Add(2)
+	go pumpReaderToStream(stdoutPipe, "stdout", writer, errCh, &wg)
+	go pumpReaderToStream(stderrPipe, "stderr", writer, errCh, &wg)
+
+	waitErr := cmd.Wait()
+	wg.Wait()
+
+	streamErr := firstStreamError(errCh)
+	ok := waitErr == nil && streamErr == nil
+	code := 0
+	errText := ""
+	if streamErr != nil {
+		code = -1
+		errText = streamErr.Error()
+	}
+	if waitErr != nil {
+		ok = false
+		code = commandExitCode(waitErr)
+		if errText == "" {
+			errText = waitErr.Error()
+		}
+	}
+	if err := writeWSMessage(conn, wsMessage{Event: "script_response", ID: id, Ok: boolPtr(ok), Code: intPtr(code), Error: errText, StreamID: stream.id}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (sb *ScriptBridge) resolveScriptFile(file string) (string, func(), error) {

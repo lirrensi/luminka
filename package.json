@@ -2,14 +2,21 @@
     "name": "luminka",
     "private": true,
     "type": "module",
+    "version": "2.0",
     "scripts": {
         "build:sdk": "tsx scripts/build_sdk.ts",
+        "build:icons": "tsx scripts/build_icons.ts",
         "build:starter": "npm run build:sdk",
         "build:examples": "npm run build:sdk",
-        "build:all": "npm run build:sdk"
+        "build:all": "npm run build:sdk",
+        "test:sdk": "tsx --test luminka/sdk/luminka.test.ts"
     },
     "devDependencies": {
+        "@types/node": "^25.5.0",
+        "@fiahfy/icns": "^0.0.7",
+        "png-to-ico": "^3.0.1",
+        "sharp": "^0.34.5",
         "tsx": "^4.21.0",
-        "typescript": "^5.9.3"
+        "typescript": "^6.0.2"
     }
 }

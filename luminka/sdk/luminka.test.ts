@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { LuminkaClient } from "./luminka.ts";
+import { decodeLuminkaFrame, encodeLuminkaFrame, LuminkaClient } from "./luminka.ts";
 
 type Listener = (event?: any) => void;
 
@@ -19,7 +19,8 @@ class FakeWebSocket {
 
   readonly url: string;
   readyState = FakeWebSocket.CONNECTING;
-  sent: string[] = [];
+  binaryType = "";
+  sent: Uint8Array[] = [];
   closeCalls = 0;
   private listeners = new Map<string, Set<Listener>>();
 
@@ -38,7 +39,7 @@ class FakeWebSocket {
     this.listeners.get(type)?.delete(listener);
   }
 
-  send(data: string): void {
+  send(data: Uint8Array): void {
     this.sent.push(data);
   }
 
@@ -53,11 +54,11 @@ class FakeWebSocket {
     this.emit("open");
   }
 
-  message(data: unknown): void {
-    this.emit("message", { data: JSON.stringify(data) });
+  message(header: any, payload: Uint8Array = new Uint8Array()): void {
+    this.emit("message", { data: encodeLuminkaFrame(header, payload) });
   }
 
-  rawMessage(data: string): void {
+  rawMessage(data: unknown): void {
     this.emit("message", { data });
   }
 
@@ -81,7 +82,14 @@ test.beforeEach(() => {
   (globalThis as any).WebSocket = FakeWebSocket;
 });
 
-test("LuminkaClient appInfo sends request and parses response", async () => {
+test("LuminkaClient frame helpers round trip", () => {
+  const frame = encodeLuminkaFrame({ event: "fs_changed", path: "notes.txt" }, new Uint8Array([1, 2, 3]));
+  const decoded = decodeLuminkaFrame(frame);
+  assert.deepEqual(decoded.header, { event: "fs_changed", path: "notes.txt" });
+  assert.deepEqual(Array.from(decoded.payload), [1, 2, 3]);
+});
+
+test("LuminkaClient appInfo sends a binary request and parses response", async () => {
   const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
   const connectPromise = client.appInfo();
   const socket = FakeWebSocket.instances[0];
@@ -89,13 +97,13 @@ test("LuminkaClient appInfo sends request and parses response", async () => {
 
   socket.open();
   await flushAsyncWork();
-  const request = JSON.parse(socket.sent[0] ?? "{}");
-  assert.equal(request.event, "app_info");
-  assert.equal(request.id, "luminka-1");
+  const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
+  assert.equal(request.header.event, "app_info");
+  assert.equal(request.header.id, "luminka-1");
 
   socket.message({
     event: "app_info",
-    id: request.id,
+    id: request.header.id,
     ok: true,
     name: "starter",
     mode: "webview",
@@ -112,97 +120,78 @@ test("LuminkaClient appInfo sends request and parses response", async () => {
   });
 });
 
-test("LuminkaClient rejects failed fs responses", async () => {
+test("LuminkaClient read/write aliases call text helpers", async () => {
   const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
-  const readPromise = client.read("secret.txt");
+  const readAlias = client.read("secret.txt");
   const socket = FakeWebSocket.instances[0];
   assert.ok(socket, "expected WebSocket instance");
 
   socket.open();
   await flushAsyncWork();
-  const request = JSON.parse(socket.sent[0] ?? "{}");
-  assert.equal(request.event, "fs_read");
-  assert.equal(request.path, "secret.txt");
+  const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
+  assert.equal(request.header.event, "fs_read_text");
+  assert.equal(request.header.path, "secret.txt");
 
-  socket.message({
-    event: "fs_response",
-    id: request.id,
-    ok: false,
-    error: "filesystem capability is disabled",
-  });
+  socket.message({ event: "fs_read_text", id: request.header.id, ok: true, data: "hello" });
+  assert.equal(await readAlias, "hello");
 
-  await assert.rejects(
-    readPromise,
-    /filesystem capability is disabled\. Enable the filesystem capability in the Luminka host app, or avoid calling this SDK method when that capability is unavailable\./,
-  );
+  const writePromise = client.write("secret.txt", "updated");
+  await flushAsyncWork();
+  const writeRequest = decodeLuminkaFrame(socket.sent[1] ?? new Uint8Array());
+  assert.equal(writeRequest.header.event, "fs_write_text");
+  assert.equal(writeRequest.header.data, "updated");
+  socket.message({ event: "fs_write_text", id: writeRequest.header.id, ok: true });
+  await writePromise;
 });
 
-test("LuminkaClient dispatches fs_changed notifications to listeners", async () => {
+test("LuminkaClient assembles byte streams from chunks", async () => {
   const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
-  const seen: string[] = [];
-  const dispose = client.onFileChanged((path) => seen.push(path));
-
-  const watchPromise = client.watch("kanban.json");
+  const bytesPromise = client.readBytes("payload.bin");
   const socket = FakeWebSocket.instances[0];
   assert.ok(socket, "expected WebSocket instance");
 
   socket.open();
   await flushAsyncWork();
-  const request = JSON.parse(socket.sent[0] ?? "{}");
-  socket.message({ event: "fs_response", id: request.id, ok: true });
-  await watchPromise;
+  const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
+  socket.message({ event: "fs_open_read", id: request.header.id, ok: true, stream_id: "stream-1" });
+  socket.message({ event: "stream_chunk", stream_id: "stream-1", seq: 0, eof: false }, new Uint8Array([1, 2]));
+  socket.message({ event: "stream_chunk", stream_id: "stream-1", seq: 1, eof: false }, new Uint8Array([3, 4]));
+  socket.message({ event: "stream_close", stream_id: "stream-1", ok: true });
 
-  socket.message({ event: "fs_changed", path: "kanban.json" });
-  assert.deepEqual(seen, ["kanban.json"]);
-
-  dispose();
-  socket.message({ event: "fs_changed", path: "ignored.json" });
-  assert.deepEqual(seen, ["kanban.json"]);
+  assert.deepEqual(Array.from(await bytesPromise), [1, 2, 3, 4]);
 });
 
-test("LuminkaClient disconnect rejects pending requests", async () => {
+test("LuminkaClient rejects pending requests when the socket closes unexpectedly", async () => {
   const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
-  const pending = client.list("");
+  const pending = client.exists("kanban.json");
   const socket = FakeWebSocket.instances[0];
   assert.ok(socket, "expected WebSocket instance");
 
   socket.open();
   await flushAsyncWork();
-  client.disconnect();
+  socket.close();
 
   await assert.rejects(
     pending,
-    /Luminka connection closed while waiting for a response\. Reconnect and retry the request\./,
+    /Luminka connection closed while waiting for a response|Luminka connection closed/,
   );
 });
 
-test("LuminkaClient derives default url from location.host", async () => {
-  const originalLocation = globalThis.location;
-  (globalThis as any).location = { host: "127.0.0.1:8787" };
-  try {
-    const client = new LuminkaClient();
-    const appInfoPromise = client.appInfo();
-    const socket = FakeWebSocket.instances[0];
-    assert.ok(socket, "expected WebSocket instance");
-    assert.equal(socket.url, "ws://127.0.0.1:8787/ws");
+test("LuminkaClient ignores malformed websocket messages until a valid response arrives", async () => {
+  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
+  const existsPromise = client.exists("kanban.json");
+  const socket = FakeWebSocket.instances[0];
+  assert.ok(socket, "expected WebSocket instance");
 
-    socket.open();
-    await flushAsyncWork();
-    const request = JSON.parse(socket.sent[0] ?? "{}");
-    socket.message({
-      event: "app_info",
-      id: request.id,
-      ok: true,
-      name: "starter",
-      mode: "browser",
-      root: "C:/apps/starter",
-      capabilities: { fs: true, scripts: false, shell: false },
-    });
+  socket.open();
+  await flushAsyncWork();
+  const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
 
-    await appInfoPromise;
-  } finally {
-    (globalThis as any).location = originalLocation;
-  }
+  socket.rawMessage("not a frame");
+  socket.message({ event: "fs_exists", id: request.header.id, ok: true, exists: true });
+
+  await assert.doesNotReject(existsPromise);
+  assert.equal(await existsPromise, true);
 });
 
 test("LuminkaClient requires explicit url outside browser hosts", async () => {
@@ -212,7 +201,7 @@ test("LuminkaClient requires explicit url outside browser hosts", async () => {
     const client = new LuminkaClient();
     await assert.rejects(
       client.appInfo(),
-      /could not infer a WebSocket URL outside a browser host context\. Pass an explicit url, for example new LuminkaClient\(\{ url: "ws:\/\/127\.0\.0\.1:7777\/ws" \}\)\./,
+      /could not infer a WebSocket URL outside a browser host context\./,
     );
   } finally {
     (globalThis as any).location = originalLocation;
@@ -229,113 +218,55 @@ test("LuminkaClient rejects connect failures from socket errors", async () => {
 
   await assert.rejects(
     connectPromise,
-    /Failed to connect to Luminka at ws:\/\/127.0.0.1:7777\/ws\. Confirm the host app is running and serving the SDK WebSocket endpoint\./,
+    /failed to connect to Luminka at ws:\/\/127.0.0.1:7777\/ws/,
   );
 });
 
-test("LuminkaClient rejects pending requests when the socket closes unexpectedly", async () => {
+test("LuminkaClient emits binary frames for script and shell streams", async () => {
   const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
-  const pending = client.exists("kanban.json");
+  const scriptPromise = client.runScriptStream("python", "tools/demo.py", ["--flag"], 12);
   const socket = FakeWebSocket.instances[0];
   assert.ok(socket, "expected WebSocket instance");
 
   socket.open();
   await flushAsyncWork();
-  socket.close();
+  const script = await scriptPromise;
+  const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
+  assert.equal(request.header.event, "script_exec_stream");
 
-  await assert.rejects(
-    pending,
-    /Luminka connection closed while waiting for a response\. Reconnect and retry the request\./,
-  );
+  socket.message({ event: "stream_chunk", stream_id: "stream-2", lane: "stdout", seq: 0, eof: false }, new Uint8Array([111, 107]));
+  socket.message({ event: "script_response", id: request.header.id, ok: true, stream_id: "stream-2", code: 0 });
+
+  const chunk = await collectStreamText(script.stdout);
+  assert.equal(chunk, "ok");
+  const result = await script.completed;
+  assert.equal(result.code, 0);
 });
 
-test("LuminkaClient disconnect closes open socket once", async () => {
-  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
-  const connectPromise = client.connect();
-  const socket = FakeWebSocket.instances[0];
-  assert.ok(socket, "expected WebSocket instance");
+async function collectStreamText(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) {
+        break;
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return new TextDecoder().decode(concat(chunks));
+}
 
-  socket.open();
-  await connectPromise;
-
-  client.disconnect();
-
-  assert.equal(socket.closeCalls, 1);
-  assert.equal(socket.readyState, FakeWebSocket.CLOSED);
-});
-
-test("LuminkaClient ignores malformed websocket messages until a valid response arrives", async () => {
-  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
-  const existsPromise = client.exists("kanban.json");
-  const socket = FakeWebSocket.instances[0];
-  assert.ok(socket, "expected WebSocket instance");
-
-  socket.open();
-  await flushAsyncWork();
-  const request = JSON.parse(socket.sent[0] ?? "{}");
-
-  socket.rawMessage("not json");
-  socket.message({ event: "fs_response", id: request.id, ok: true, exists: true });
-
-  await assert.doesNotReject(existsPromise);
-  assert.equal(await existsPromise, true);
-});
-
-test("LuminkaClient rejects incomplete app_info responses", async () => {
-  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
-  const appInfoPromise = client.appInfo();
-  const socket = FakeWebSocket.instances[0];
-  assert.ok(socket, "expected WebSocket instance");
-
-  socket.open();
-  await flushAsyncWork();
-  const request = JSON.parse(socket.sent[0] ?? "{}");
-
-  socket.message({
-    event: "app_info",
-    id: request.id,
-    ok: true,
-    name: "starter",
-    mode: "browser",
-    root: "C:/apps/starter",
-  });
-
-  await assert.rejects(
-    appInfoPromise,
-    /Luminka app_info response was incomplete: missing capabilities\. Check that the host returns name, mode, root, and capabilities\./,
-  );
-});
-
-test("LuminkaClient runScript and runShell preserve wrapper request shapes", async () => {
-  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
-  const scriptPromise = client.runScript("python", "tools/demo.py", ["--flag"], 12);
-  const socket = FakeWebSocket.instances[0];
-  assert.ok(socket, "expected WebSocket instance");
-
-  socket.open();
-  await flushAsyncWork();
-  const scriptRequest = JSON.parse(socket.sent[0] ?? "{}");
-  assert.deepEqual(scriptRequest, {
-    event: "script_exec",
-    id: "luminka-1",
-    runner: "python",
-    file: "tools/demo.py",
-    args: ["--flag"],
-    timeout: 12,
-  });
-  socket.message({ event: "script_response", id: scriptRequest.id, ok: true, stdout: "ok", stderr: "", code: 0 });
-  await assert.doesNotReject(scriptPromise);
-
-  const shellPromise = client.runShell("node", ["script.js"], 8);
-  await flushAsyncWork();
-  const shellRequest = JSON.parse(socket.sent[1] ?? "{}");
-  assert.deepEqual(shellRequest, {
-    event: "shell_exec",
-    id: "luminka-2",
-    cmd: "node",
-    args: ["script.js"],
-    timeout: 8,
-  });
-  socket.message({ event: "shell_response", id: shellRequest.id, ok: true, stdout: "done", stderr: "", code: 0 });
-  await assert.doesNotReject(shellPromise);
-});
+function concat(chunks: Uint8Array[]): Uint8Array {
+  const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  const output = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
+}

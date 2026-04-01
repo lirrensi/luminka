@@ -29,6 +29,57 @@ func NewFSBridge(root string) *FSBridge {
 	return &FSBridge{root: resolved}
 }
 
+func (fsb *FSBridge) ReadBytes(path string) ([]byte, error) {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(resolved)
+}
+
+func (fsb *FSBridge) WriteBytes(path string, data []byte) error {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(resolved, data, 0o644)
+}
+
+func (fsb *FSBridge) OpenRead(path string) (*os.File, int64, error) {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	file, err := os.Open(resolved)
+	if err != nil {
+		return nil, 0, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, 0, err
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, 0, errors.New("directories cannot be opened for reading")
+	}
+	return file, info.Size(), nil
+}
+
+func (fsb *FSBridge) OpenWrite(path string) (*os.File, error) {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
+		return nil, err
+	}
+	return os.OpenFile(resolved, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+}
+
 func (fsb *FSBridge) sanitize(path string) (string, error) {
 	if fsb == nil {
 		return "", errors.New("filesystem bridge is required")
@@ -38,11 +89,7 @@ func (fsb *FSBridge) sanitize(path string) (string, error) {
 }
 
 func (fsb *FSBridge) Read(path string) (string, error) {
-	resolved, err := fsb.sanitize(path)
-	if err != nil {
-		return "", err
-	}
-	data, err := os.ReadFile(resolved)
+	data, err := fsb.ReadBytes(path)
 	if err != nil {
 		return "", err
 	}
@@ -50,14 +97,7 @@ func (fsb *FSBridge) Read(path string) (string, error) {
 }
 
 func (fsb *FSBridge) Write(path string, data string) error {
-	resolved, err := fsb.sanitize(path)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(resolved, []byte(data), 0o644)
+	return fsb.WriteBytes(path, []byte(data))
 }
 
 func (fsb *FSBridge) List(path string) ([]string, error) {

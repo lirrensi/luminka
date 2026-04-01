@@ -2,9 +2,9 @@
 
 ## Abstract
 
-Luminka specifies a small local runtime for built web applications. A conforming Luminka app embeds static frontend assets into a local executable, serves them over a localhost-only interface, and exposes selected local capabilities over a canonical WebSocket protocol.
+Luminka specifies a small local runtime for built web applications. A conforming Luminka app embeds static frontend assets into a local executable, serves them over a localhost-only interface, and exposes selected local capabilities over a canonical WebSocket transport.
 
-The product supports two equal first-class display profiles: browser and webview. It also supports capability gating for filesystem access, constrained script execution, and unrestricted shell execution.
+The product supports two equal first-class display profiles: browser and webview. It also supports portable and detached root policies, normal and headless launch behavior, byte-capable filesystem transfer, constrained script execution, and unrestricted shell execution.
 
 ## Introduction
 
@@ -14,6 +14,7 @@ The specification defines:
 
 - what a Luminka app artifact is,
 - how the runtime behaves,
+- how roots and launch behavior are resolved,
 - how capabilities are exposed and gated,
 - how frontend code communicates with the runtime,
 - what an implementation must preserve to remain conforming.
@@ -27,9 +28,12 @@ This specification covers:
 - embedded static asset serving,
 - localhost runtime behavior,
 - browser and webview display profiles,
-- single-instance behavior per app folder,
+- portable and detached root policies,
+- normal and headless launch behavior,
+- single-instance behavior per resolved app root,
 - runtime capability gating,
-- WebSocket message contracts,
+- WebSocket transport contracts,
+- chunked byte streams,
 - default external data location,
 - lifecycle and shutdown behavior.
 
@@ -40,11 +44,12 @@ This specification does not cover:
 - authentication or multi-user network access,
 - package registry behavior,
 - cloud synchronization,
-- binary asset transfer in v1.
+- interactive PTY semantics,
+- general stdin streaming for local processes in v1.
 
 ## Terminology
 
-Key terms are defined in [glossary.md](glossary.md). In this document, "binary folder", "browser build", "webview build", "capability", and "trusted frontend" use the glossary definitions.
+Key terms are defined in [glossary.md](glossary.md). In this document, "portable root policy", "detached root policy", "resolved app root", "headless launch", "stream", "stream session", "binary frame envelope", and "trusted frontend" use the glossary definitions.
 
 ## Normative Language
 
@@ -65,7 +70,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** in
 A Luminka app instance consists of:
 
 1. a single executable containing embedded frontend assets, and
-2. external files located in the binary folder by default.
+2. external files located in the resolved app root.
 
 The runtime MUST serve the embedded assets from inside the executable. The runtime MUST NOT require a separate frontend development server for normal operation.
 
@@ -79,6 +84,28 @@ Luminka defines two display profiles:
 | Webview | The runtime opens the app in a native WebView window. |
 
 These profiles are equal first-class product modes. A specific built binary conforms to exactly one display profile at runtime.
+
+### Root Policies
+
+Luminka defines two root policies:
+
+| Policy | Description |
+|---|---|
+| Portable | The runtime resolves the app root from the executable folder. |
+| Detached | The runtime resolves the app root from the current working directory. |
+
+An app MAY choose either policy as its default. A launch-time override MAY select either policy regardless of the app default.
+
+### Launch Behavior
+
+Luminka defines two launch behaviors:
+
+| Behavior | Description |
+|---|---|
+| Normal | Start the runtime and open the configured browser or webview shell. |
+| Headless | Start the runtime without opening a browser tab or webview window. |
+
+Headless launch is independent of display profile. A browser or webview build MAY both be launched headlessly.
 
 ### Capability Model
 
@@ -104,18 +131,21 @@ A conforming Luminka runtime MUST:
 
 1. serve embedded assets from a localhost-only runtime,
 2. expose the canonical WebSocket transport,
-3. preserve single-instance behavior per app folder,
-4. default the external root to the binary folder,
+3. preserve single-instance behavior per resolved app root,
+4. resolve the external root according to root policy and launch overrides,
 5. report capability availability accurately,
 6. enforce capability gating consistently,
 7. implement at least one display profile,
-8. reject unsupported or disabled capability calls explicitly.
+8. implement normal launch behavior,
+9. reject unsupported or disabled capability calls explicitly.
 
 ### Product Conformance
 
 A conforming Luminka product implementation SHOULD provide both browser and webview display profiles.
 
 The reference repository is expected to provide both profiles even though a single built binary uses one profile at runtime.
+
+A conforming product implementation SHOULD provide both root policies and headless launch behavior.
 
 ### Capability Conformance
 
@@ -147,19 +177,29 @@ The runtime MUST prefer exact embedded file matches first. If a `GET` or `HEAD` 
 
 If an entry document is found, the runtime MUST return `200 OK`. `HEAD` requests MUST return headers only. If no entry document exists, the runtime MUST return `404 Not Found`.
 
-### 2. Default Root and External Files
+### 2. Root Resolution and External Files
 
-The canonical default root for external files MUST be the binary folder.
+The runtime MUST resolve an effective app root for each launch.
 
-Unless explicitly configured otherwise by the app author, all default filesystem operations, script path validation, lock files, and related runtime-local artifacts MUST resolve relative to the binary folder.
+The resolved app root MUST be determined in this order:
+
+1. explicit launch override,
+2. app-configured default root policy,
+3. portable behavior if no root policy is specified.
+
+Portable behavior resolves the app root from the executable folder.
+
+Detached behavior resolves the app root from the current working directory.
+
+Unless explicitly configured otherwise by the app author, all default filesystem operations, script path validation, lock files, and related runtime-local artifacts MUST resolve relative to the resolved app root.
 
 ### 3. Single-Instance Behavior
 
-A Luminka app MUST behave as a single instance within its app folder.
+A Luminka app MUST behave as a single instance within its resolved app root.
 
-If the executable is launched and no live instance exists for that folder, the runtime MUST start normally.
+If the executable is launched and no live instance exists for that resolved root, the runtime MUST start normally.
 
-If the executable is launched and a live instance already exists for that folder, the runtime MUST NOT start a second independent instance for that same folder.
+If the executable is launched and a live instance already exists for that resolved root, the runtime MUST NOT start a second independent instance for that same root.
 
 In that case:
 
@@ -191,7 +231,19 @@ In the webview profile, the runtime MUST:
 4. remain alive while the window is open,
 5. shut down when the window is closed unless another foreground shell policy is explicitly implemented.
 
-### 6. Localhost Transport
+### 6. Headless Launch Behavior
+
+In headless launch behavior, the runtime MUST:
+
+1. start the localhost runtime,
+2. serve the embedded frontend,
+3. expose the enabled capability bridge,
+4. refrain from opening a browser tab or webview window,
+5. remain alive while the foreground host process remains alive.
+
+In headless launch behavior, browser idle timeout semantics and webview window-lifecycle semantics MUST NOT be the primary lifetime controller.
+
+### 7. Localhost Transport
 
 The runtime MUST listen only on loopback interfaces.
 
@@ -199,23 +251,31 @@ The frontend communicates with the runtime over WebSocket. The canonical endpoin
 
 The runtime MAY use HTTP to serve embedded assets, but REST-style HTTP APIs are not the canonical capability surface.
 
-### 7. WebSocket Message Envelope
+### 8. WebSocket Frame Envelope
 
-The wire format MUST be JSON.
+The canonical WebSocket frame format MUST be binary and MUST follow this layout:
 
-Requests MUST contain at least:
+```text
+[4-byte big-endian JSON header length][UTF-8 JSON header][payload bytes]
+```
+
+The JSON header MUST describe the message semantics. The payload MAY be empty.
+
+Control-only messages MUST use an empty payload.
+
+The JSON header for requests MUST contain at least:
 
 ```json
 { "event": "<event_name>", "id": "<request_id>" }
 ```
 
-Responses MUST contain at least:
+The JSON header for successful responses MUST contain at least:
 
 ```json
 { "event": "<response_event>", "id": "<request_id>", "ok": true }
 ```
 
-Failed responses MUST contain at least:
+The JSON header for failed responses MUST contain at least:
 
 ```json
 { "event": "<response_event>", "id": "<request_id>", "ok": false, "error": "<message>" }
@@ -223,17 +283,35 @@ Failed responses MUST contain at least:
 
 Server-pushed notifications MAY omit `id` when they are not direct responses to a request.
 
-### 8. Runtime Introspection
+### 9. Stream Sessions
+
+Luminka MUST support stream-oriented transfers for payload-bearing operations.
+
+A stream session MUST be identified by a `stream_id`.
+
+The JSON header MAY include fields such as:
+
+- `stream_id`
+- `seq`
+- `lane`
+- `eof`
+- `content_type`
+
+Chunked transfers MUST preserve ordering within a stream session.
+
+The payload bytes of a frame MUST be interpreted according to the JSON header.
+
+### 10. Runtime Introspection
 
 The runtime MUST support `app_info`.
 
-Request:
+Request header:
 
 ```json
 { "event": "app_info", "id": "a1" }
 ```
 
-Response:
+Response header:
 
 ```json
 {
@@ -253,19 +331,21 @@ Response:
 
 `mode` MUST be either `browser` or `webview`.
 
-### 9. Filesystem Capability
+### 11. Filesystem Capability
 
 If filesystem capability is enabled, the runtime MUST support the following events:
 
 | Request event | Response event | Behavior |
 |---|---|---|
-| `fs_read` | `fs_response` | Read a text file |
-| `fs_write` | `fs_response` | Write a text file |
+| `fs_read_text` | `fs_response` | Read a text file |
+| `fs_write_text` | `fs_response` | Write a text file |
 | `fs_list` | `fs_response` | List a directory |
 | `fs_delete` | `fs_response` | Delete a file; directories are rejected |
 | `fs_exists` | `fs_response` | Check path existence |
 | `fs_watch` | `fs_response` | Register a watched path |
 | `fs_unwatch` | `fs_response` | Remove a watched path |
+| `fs_open_read` | `fs_response` or equivalent | Open a chunked read stream |
+| `fs_open_write` | `fs_response` or equivalent | Open a chunked write stream |
 
 Paths MUST be interpreted relative to the resolved app root.
 
@@ -277,25 +357,23 @@ The runtime MUST reject:
 
 The runtime MUST NOT impose an application schema on file contents.
 
-`fs_read` and `fs_write` operate on text content in v1.
+`fs_read_text` and `fs_write_text` are convenience operations layered on top of the runtime's byte-capable transport model.
 
-Example read:
+Chunked filesystem transfer MUST be supported from the start. A conforming implementation MUST NOT require that large files fit into one request or one response frame.
 
-```json
-{ "event": "fs_read", "id": "f1", "path": "data.yaml" }
-```
+Example text read header:
 
 ```json
-{ "event": "fs_response", "id": "f1", "ok": true, "data": "version: 1\n" }
+{ "event": "fs_read_text", "id": "f1", "path": "data.yaml" }
 ```
 
 If filesystem capability is disabled, any `fs_*` call MUST fail explicitly.
 
-### 10. Filesystem Change Notifications
+### 12. Filesystem Change Notifications
 
 If filesystem capability is enabled and a path is being watched, the runtime MUST notify the frontend when an observed external change occurs.
 
-Notification shape:
+Notification header:
 
 ```json
 { "event": "fs_changed", "path": "data.yaml" }
@@ -303,11 +381,11 @@ Notification shape:
 
 The implementation MAY use polling or native OS file watching. The observable contract is the notification, not the detection strategy.
 
-### 11. Script Execution Capability
+### 13. Script Execution Capability
 
-If script capability is enabled, the runtime MUST support `script_exec`.
+If script capability is enabled, the runtime MUST support synchronous execution and MAY additionally support stream-mode execution.
 
-`script_exec` is the constrained execution lane. It is distinct from shell execution.
+The constrained execution lane is distinct from shell execution.
 
 The request model is a triplet:
 
@@ -322,7 +400,7 @@ The `file` value is a script selector.
 
 The runtime MUST validate the selected script before execution.
 
-Request shape:
+Synchronous request header:
 
 ```json
 {
@@ -349,15 +427,9 @@ The spawned process MUST run with the resolved app root as its working directory
 
 The runtime MAY materialize an internal script to a temporary local file before execution, but the observable behavior MUST remain equivalent to running the bundled script itself.
 
-The runtime MUST NOT apply additional semantic validation to `args` beyond normal message parsing. In other words, once the `file` has been validated, `args` are passed through as provided.
+The runtime MUST NOT apply additional semantic validation to `args` beyond normal message parsing.
 
-The resulting process shape is conceptually:
-
-```text
-runner <validated-file> <args...>
-```
-
-Response shape:
+Synchronous response header:
 
 ```json
 {
@@ -370,17 +442,25 @@ Response shape:
 }
 ```
 
+If stream execution is supported for scripts, the runtime MUST:
+
+1. allow a script process to be started in a stream mode,
+2. emit stdout and stderr as ordered stream chunks,
+3. emit a terminal completion event with final exit status.
+
+General stdin streaming is not required in v1 of this stream model.
+
 If the selected external script is missing from the allowed root, or the selected internal script is missing from the embedded bundle, the runtime MUST reject the request.
 
 If script capability is disabled, `script_exec` MUST fail explicitly.
 
-### 12. Shell Execution Capability
+### 14. Shell Execution Capability
 
-If shell capability is enabled, the runtime MUST support `shell_exec`.
+If shell capability is enabled, the runtime MUST support synchronous execution and MAY additionally support stream-mode execution.
 
 `shell_exec` is the unrestricted execution lane.
 
-Request shape:
+Synchronous request header:
 
 ```json
 {
@@ -398,7 +478,7 @@ The runtime MUST pass the command directly to local process spawning without com
 
 The spawned process MUST run with the resolved app root as its working directory.
 
-Response shape:
+Synchronous response header:
 
 ```json
 {
@@ -411,13 +491,23 @@ Response shape:
 }
 ```
 
+If stream execution is supported for shell commands, the runtime MUST:
+
+1. allow a process to be started in a stream mode,
+2. emit stdout and stderr as ordered stream chunks,
+3. emit a terminal completion event with final exit status.
+
+General stdin streaming is not required in v1 of this stream model.
+
 If shell capability is disabled, `shell_exec` MUST fail explicitly.
 
-### 13. Idle and Shutdown Behavior
+### 15. Idle and Shutdown Behavior
 
 Browser builds SHOULD shut down after a configurable idle period once all active frontend connections are gone.
 
 Webview builds SHOULD shut down when the owning window is closed.
+
+Headless launches SHOULD shut down when the owning foreground process exits.
 
 On clean shutdown, the runtime MUST clean up its instance state.
 
@@ -431,7 +521,9 @@ A Luminka app configuration MUST include conceptually equivalent fields to the f
 |---|---|---|
 | `name` | App identity used for runtime-local artifacts | implementation-defined |
 | `mode` | `browser` or `webview` | app-defined |
-| `root` | External app root | binary folder |
+| `root_policy` | `portable` or `detached` default root policy | `portable` |
+| `root` | Explicit external app root override | none |
+| `headless` | Launch without opening browser/webview shell | `false` |
 | `idle_timeout` | Browser idle shutdown timeout | 180s |
 | `fs_enabled` | Exposed filesystem capability | true |
 | `scripts_enabled` | Exposed script capability | false |
@@ -442,9 +534,9 @@ The exact configuration surface MAY differ by implementation language.
 
 ### Instance State
 
-An implementation MUST persist enough state to detect whether another live instance already owns the current app folder.
+An implementation MUST persist enough state to detect whether another live instance already owns the current resolved app root.
 
-The reference model uses a lock file containing `PID:port` in the binary folder.
+The reference model uses a lock file containing `PID:port` in the resolved app root.
 
 Equivalent mechanisms are permitted if they preserve the same observable behavior.
 
@@ -460,12 +552,15 @@ The runtime MUST handle the following situations explicitly:
 
 - stale instance state,
 - no available port,
-- malformed WebSocket messages,
+- malformed frame envelopes,
+- malformed JSON headers,
 - unknown events,
 - disabled capabilities,
 - unsupported capabilities,
 - invalid or escaping paths,
 - missing script files,
+- stream chunk ordering errors,
+- premature stream termination,
 - process timeout,
 - frontend disconnects.
 
@@ -490,6 +585,10 @@ Filesystem capability exposes local file access within the allowed root.
 Script capability exposes controlled local execution against allowed local files.
 
 Shell capability exposes unrestricted local command execution and is therefore a full-trust mode.
+
+Detached mode changes locality by making the current working directory the default app root, but it does not change the trust model.
+
+Headless mode changes lifecycle behavior but does not make the runtime safer or more network-exposed.
 
 Implementations MUST NOT claim stronger security properties than this model actually provides.
 

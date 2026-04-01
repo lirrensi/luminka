@@ -44,3 +44,12 @@ data.yaml
 
 private/
 agent_chat/
+
+# Generated build outputs
+**/dist/
+starter/build/
+*.syso
+
+# Generated Windows resource files
+starter/winres/icon*.png
+starter/winres/winres.json

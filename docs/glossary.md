@@ -20,6 +20,18 @@ The built frontend files compiled into the executable and served from inside it 
 
 The folder containing the built Luminka executable. This is the canonical default location for external data, logs, scripts, and related app files.
 
+## Portable Root Policy
+
+The runtime root policy in which Luminka resolves the app root from the executable folder. This preserves the classic portable-app behavior where data and runtime-local artifacts live beside the binary.
+
+## Detached Root Policy
+
+The runtime root policy in which Luminka resolves the app root from the current working directory instead of the executable folder. This supports a single globally installed binary serving many different project folders.
+
+## Resolved App Root
+
+The effective external root directory used by the current Luminka process after applying app defaults and any launch-time overrides. Filesystem access, script validation, shell working directory, and instance scoping are all relative to this root.
+
 ## Starter
 
 The official minimal scaffold in this repository for creating a new Luminka app. It imports the Luminka runtime and provides the default adoption path.
@@ -54,7 +66,23 @@ An unrestricted execution capability that passes commands directly to local proc
 
 ## WebSocket Protocol
 
-The canonical wire-level contract between the frontend and the Luminka runtime.
+The canonical wire-level contract between the frontend and the Luminka runtime. In the current canon, Luminka uses a binary WebSocket frame envelope with a JSON header and optional raw payload bytes.
+
+## Binary Frame Envelope
+
+The canonical WebSocket frame format used by Luminka. Each frame consists of a 4-byte big-endian JSON header length, a UTF-8 JSON header, and optional raw payload bytes.
+
+## Stream
+
+A byte-oriented transfer lane used for chunked file I/O, process output, and future payload-bearing runtime features.
+
+## Stream Session
+
+A specific logical stream identified by a stream ID. A stream session carries ordered chunks and explicit completion or failure signaling.
+
+## Headless Launch
+
+A runtime launch policy in which Luminka starts the local server and capability bridge without opening a browser tab or webview window. The process is intended to live as a foreground command-line process and die naturally when that process ends.
 
 ## TypeScript SDK
 

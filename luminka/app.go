@@ -1,6 +1,6 @@
 // FILE: luminka/app.go
-// PURPOSE: Orchestrate Luminka runtime startup, capability resolution, and shutdown flow.
-// OWNS: Config and Mode definitions, runtime state, capability state, and startup/shutdown flow.
+// PURPOSE: Orchestrate Luminka runtime startup, launch policy resolution, and shutdown flow.
+// OWNS: Config and Mode definitions, runtime state, launch policy state, capability state, and startup/shutdown flow.
 // EXPORTS: Mode, ModeBrowser, ModeWebview, Config, Runtime, Run
 // DOCS: docs/spec.md, docs/arch.md
 
@@ -30,6 +30,8 @@ const (
 type Config struct {
 	Name            string
 	Mode            Mode
+	RootPolicy      RootPolicy
+	Headless        bool
 	Port            int
 	Idle            time.Duration
 	WindowTitle     string
@@ -56,6 +58,8 @@ type Runtime struct {
 	Name            string
 	Mode            Mode
 	Root            string
+	RootPolicy      RootPolicy
+	Headless        bool
 	Idle            time.Duration
 	ExecTimeout     time.Duration
 	WindowTitle     string
@@ -80,6 +84,7 @@ type Runtime struct {
 	connections map[*wsConnection]struct{}
 	mu          sync.Mutex
 	idleTimer   *time.Timer
+	streams     *streamRegistry
 
 	shutdownCh   chan struct{}
 	shutdownOnce sync.Once
@@ -102,7 +107,11 @@ type existingInstanceAction struct {
 }
 
 func Run(cfg Config) (err error) {
-	cfg = normalizeConfig(cfg)
+	launchOpts, err := parseLaunchOptions(os.Args[1:])
+	if err != nil {
+		return err
+	}
+	cfg = applyLaunchOverrides(normalizeConfig(cfg), launchOpts)
 	if cfg.Assets == nil {
 		return errors.New("assets are required")
 	}
@@ -131,10 +140,12 @@ func Run(cfg Config) (err error) {
 		return err
 	}
 
-	switch rt.Mode {
-	case ModeBrowser:
+	switch runtimeLaunchModeFor(rt) {
+	case runtimeLaunchHeadless:
+		err = runHeadless(rt)
+	case runtimeLaunchBrowser:
 		err = runBrowser(rt)
-	case ModeWebview:
+	case runtimeLaunchWebview:
 		err = runWebview(rt)
 	default:
 		err = fmt.Errorf("unsupported mode %q", rt.Mode)
@@ -145,6 +156,9 @@ func Run(cfg Config) (err error) {
 func decideExistingInstanceAction(cfg Config, existing *lockState) existingInstanceAction {
 	if existing == nil {
 		return existingInstanceAction{continueStartup: true}
+	}
+	if cfg.Headless {
+		return existingInstanceAction{}
 	}
 	switch cfg.Mode {
 	case ModeBrowser:
@@ -166,6 +180,9 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.Mode == "" {
 		cfg.Mode = ModeBrowser
 	}
+	if cfg.RootPolicy == "" {
+		cfg.RootPolicy = RootPolicyPortable
+	}
 	if cfg.WindowTitle == "" {
 		cfg.WindowTitle = cfg.Name
 	}
@@ -185,7 +202,7 @@ func normalizeConfig(cfg Config) Config {
 }
 
 func prepareRuntime(cfg Config) (*Runtime, *lockState, error) {
-	root, err := resolveRootDirectory(cfg.Root)
+	root, err := resolveRootDirectory(cfg.Root, cfg.RootPolicy)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -202,6 +219,8 @@ func prepareRuntime(cfg Config) (*Runtime, *lockState, error) {
 		Name:            cfg.Name,
 		Mode:            cfg.Mode,
 		Root:            root,
+		RootPolicy:      cfg.RootPolicy,
+		Headless:        cfg.Headless,
 		Idle:            cfg.Idle,
 		ExecTimeout:     cfg.ExecTimeout,
 		WindowTitle:     cfg.WindowTitle,
@@ -215,6 +234,7 @@ func prepareRuntime(cfg Config) (*Runtime, *lockState, error) {
 		PID:             state.pid,
 		ownedLock:       state.owned,
 		connections:     make(map[*wsConnection]struct{}),
+		streams:         newStreamRegistry(),
 		shutdownCh:      make(chan struct{}),
 	}
 
@@ -234,6 +254,42 @@ func prepareRuntime(cfg Config) (*Runtime, *lockState, error) {
 	return rt, nil, nil
 }
 
+func applyLaunchOverrides(cfg Config, opts launchOptions) Config {
+	if opts.Root != "" {
+		cfg.Root = opts.Root
+	}
+	if opts.RootPolicy != "" {
+		cfg.RootPolicy = opts.RootPolicy
+	}
+	cfg.Headless = cfg.Headless || opts.Headless
+	return cfg
+}
+
+type runtimeLaunchMode string
+
+const (
+	runtimeLaunchBrowser  runtimeLaunchMode = "browser"
+	runtimeLaunchWebview  runtimeLaunchMode = "webview"
+	runtimeLaunchHeadless runtimeLaunchMode = "headless"
+)
+
+func runtimeLaunchModeFor(rt *Runtime) runtimeLaunchMode {
+	if rt == nil {
+		return ""
+	}
+	if rt.Headless {
+		return runtimeLaunchHeadless
+	}
+	switch rt.Mode {
+	case ModeBrowser:
+		return runtimeLaunchBrowser
+	case ModeWebview:
+		return runtimeLaunchWebview
+	default:
+		return ""
+	}
+}
+
 func (rt *Runtime) requestShutdown() {
 	if rt == nil {
 		return
@@ -251,6 +307,9 @@ func (rt *Runtime) cleanup() error {
 	rt.stopIdleTimer()
 	if rt.Watcher != nil {
 		rt.Watcher.Stop()
+	}
+	if rt.streams != nil {
+		rt.streams.closeAll()
 	}
 
 	var firstErr error

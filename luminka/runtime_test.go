@@ -9,6 +9,7 @@ package luminka
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -82,6 +83,72 @@ func TestPrepareRuntimeResolvesCapabilitiesAndWindowFields(t *testing.T) {
 	}
 	if rt.Capabilities.Shell != shellSupportAvailable() {
 		t.Fatalf("Capabilities.Shell = %v, want %v", rt.Capabilities.Shell, shellSupportAvailable())
+	}
+}
+
+func TestResolveRootDirectoryPortableUsesExecutableDir(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable() error = %v", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	if abs, err := filepath.Abs(exe); err == nil {
+		exe = abs
+	}
+	want := filepath.Dir(exe)
+
+	got, err := resolveRootDirectory("", RootPolicyPortable)
+	if err != nil {
+		t.Fatalf("resolveRootDirectory() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("portable root = %q, want %q", got, want)
+	}
+}
+
+func TestResolveRootDirectoryDetachedUsesWorkingDir(t *testing.T) {
+	original, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() error = %v", err)
+	}
+	tempDir := t.TempDir()
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(original) })
+
+	got, err := resolveRootDirectory("", RootPolicyDetached)
+	if err != nil {
+		t.Fatalf("resolveRootDirectory() error = %v", err)
+	}
+	if got != tempDir {
+		t.Fatalf("detached root = %q, want %q", got, tempDir)
+	}
+}
+
+func TestApplyLaunchOverridesPrefersExplicitRoot(t *testing.T) {
+	cfg := normalizeConfig(Config{Root: "config-root", RootPolicy: RootPolicyPortable})
+	got := applyLaunchOverrides(cfg, launchOptions{Root: "launch-root", RootPolicy: RootPolicyDetached, Headless: true})
+
+	if got.Root != "launch-root" {
+		t.Fatalf("Root = %q, want launch-root", got.Root)
+	}
+	if got.RootPolicy != RootPolicyDetached {
+		t.Fatalf("RootPolicy = %q, want detached", got.RootPolicy)
+	}
+	if !got.Headless {
+		t.Fatal("Headless = false, want true")
+	}
+}
+
+func TestRuntimeLaunchModeForHeadlessBrowserAndWebview(t *testing.T) {
+	if got := runtimeLaunchModeFor(&Runtime{Mode: ModeBrowser, Headless: true}); got != runtimeLaunchHeadless {
+		t.Fatalf("browser headless launch mode = %q, want %q", got, runtimeLaunchHeadless)
+	}
+	if got := runtimeLaunchModeFor(&Runtime{Mode: ModeWebview, Headless: true}); got != runtimeLaunchHeadless {
+		t.Fatalf("webview headless launch mode = %q, want %q", got, runtimeLaunchHeadless)
 	}
 }
 
@@ -228,6 +295,17 @@ func TestDecideExistingInstanceActionExitsQuietlyForWebviewInstance(t *testing.T
 	}
 	if action.browserURL != "" {
 		t.Fatalf("browserURL = %q, want empty", action.browserURL)
+	}
+}
+
+func TestDecideExistingInstanceActionExitsQuietlyForHeadlessRelaunch(t *testing.T) {
+	action := decideExistingInstanceAction(Config{Mode: ModeBrowser, Headless: true}, &lockState{pid: os.Getpid(), port: 43123, reused: true})
+
+	if action.continueStartup {
+		t.Fatal("continueStartup = true, want false")
+	}
+	if action.openBrowser {
+		t.Fatal("openBrowser = true, want false")
 	}
 }
 

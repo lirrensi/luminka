@@ -2,7 +2,7 @@
 // PURPOSE: Resolve the runtime root and manage single-instance lock files.
 // OWNS: Root resolution, lock parsing, lock creation, stale lock recovery, and cleanup.
 // EXPORTS: none
-// DOCS: agent_chat/plan_luminka_phase1_runtime_2026-03-30.md
+// DOCS: agent_chat/plan_luminka_phase1_runtime_2026-03-30.md, agent_chat/plan_luminka_stream_runtime_2026-04-01.md
 
 package luminka
 
@@ -15,18 +15,18 @@ import (
 	"strings"
 )
 
-func resolveRootDirectory(root string) (string, error) {
-	if root == "" {
+func resolveRootDirectory(root string, policy RootPolicy) (string, error) {
+	if root != "" {
+		return resolveAbsoluteRoot(root)
+	}
+	switch policy {
+	case RootPolicyDetached:
+		return resolveWorkingDir()
+	case "", RootPolicyPortable:
 		return resolveExecutableDir()
+	default:
+		return "", fmt.Errorf("unsupported root policy %q", policy)
 	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
-	}
-	return abs, nil
 }
 
 func resolveExecutableDir() (string, error) {
@@ -41,6 +41,25 @@ func resolveExecutableDir() (string, error) {
 		exe = abs
 	}
 	return filepath.Dir(exe), nil
+}
+
+func resolveWorkingDir() (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return resolveAbsoluteRoot(wd)
+}
+
+func resolveAbsoluteRoot(root string) (string, error) {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	return abs, nil
 }
 
 func lockFilePath(root, name string) string {

@@ -1,11 +1,46 @@
 package luminka
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 )
+
+func TestFSBridgeByteRoundTripOperations(t *testing.T) {
+	root := t.TempDir()
+	fsb := NewFSBridge(root)
+	data := []byte{0x00, 0x01, 0x02, 0xff, 0x10}
+
+	f, err := fsb.OpenWrite(filepath.Join("bytes", "payload.bin"))
+	if err != nil {
+		t.Fatalf("OpenWrite() error = %v", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	readFile, size, err := fsb.OpenRead(filepath.Join("bytes", "payload.bin"))
+	if err != nil {
+		t.Fatalf("OpenRead() error = %v", err)
+	}
+	defer readFile.Close()
+	if size != int64(len(data)) {
+		t.Fatalf("OpenRead size = %d, want %d", size, len(data))
+	}
+	readData, err := io.ReadAll(readFile)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if !reflect.DeepEqual(readData, data) {
+		t.Fatalf("OpenRead data = %#v, want %#v", readData, data)
+	}
+}
 
 func TestFSBridgeRoundTripOperations(t *testing.T) {
 	root := t.TempDir()
@@ -90,5 +125,16 @@ func TestResolvePathWithinRootRejectsSymlinkEscape(t *testing.T) {
 
 	if _, err := resolvePathWithinRoot(root, filepath.Join("escape-link", "outside.txt")); err == nil {
 		t.Fatal("resolvePathWithinRoot() succeeded through escaping symlink, want error")
+	}
+}
+
+func TestFSBridgeRejectsDirectoryDelete(t *testing.T) {
+	root := t.TempDir()
+	fsb := NewFSBridge(root)
+	if err := os.MkdirAll(filepath.Join(root, "notes"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := fsb.Delete("notes"); err == nil {
+		t.Fatal("Delete() on directory succeeded, want error")
 	}
 }

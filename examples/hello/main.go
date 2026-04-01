@@ -20,6 +20,7 @@ func main() {
 	if err := luminka.Run(luminka.Config{
 		Name:            "luminka-hello",
 		Mode:            appMode(),
+		RootPolicy:      luminka.RootPolicyPortable,
 		WindowTitle:     "luminka-hello",
 		WindowWidth:     1280,
 		WindowHeight:    800,

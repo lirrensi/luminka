@@ -1,19 +1,19 @@
 // FILE: luminka/ws_test.go
-// PURPOSE: Verify websocket protocol behavior, capability responses, watcher pushes, and origin safety rules.
-// OWNS: Handler-level websocket tests for request flows and upgrade acceptance or rejection.
+// PURPOSE: Verify binary websocket protocol behavior, capability responses, watcher pushes, and origin safety rules.
+// OWNS: Handler-level websocket tests for request flows and origin validation.
 // EXPORTS: none
-// DOCS: docs/spec.md, docs/arch.md, agent_chat/plan_luminka_runtime_safety_2026-03-30.md
+// DOCS: docs/spec.md, docs/arch.md, agent_chat/plan_luminka_stream_runtime_2026-04-01.md
 
 package luminka
 
 import (
-	"encoding/json"
-	"io/fs"
+	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -23,11 +23,7 @@ import (
 
 func TestWebSocketAppInfoAndFilesystemFlow(t *testing.T) {
 	root := t.TempDir()
-	rt, serverURL := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
-	defer rt.cleanup()
-
-	conn := mustDialWS(t, serverURL)
-	defer conn.Close()
+	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
 
 	mustWriteWS(t, conn, map[string]any{"event": "app_info", "id": "a1"})
 	appInfo := mustReadWS(t, conn)
@@ -43,10 +39,10 @@ func TestWebSocketAppInfoAndFilesystemFlow(t *testing.T) {
 		t.Fatalf("app_info capabilities = %#v, want fs enabled", appInfo["capabilities"])
 	}
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_write", "id": "f1", "path": "notes/todo.txt", "data": "ship tests"})
+	mustWriteWS(t, conn, map[string]any{"event": "fs_write_text", "id": "f1", "path": "notes/todo.txt", "data": "ship tests"})
 	assertWSOK(t, mustReadWS(t, conn), "fs_response", "f1")
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_read", "id": "f2", "path": "notes/todo.txt"})
+	mustWriteWS(t, conn, map[string]any{"event": "fs_read_text", "id": "f2", "path": "notes/todo.txt"})
 	read := mustReadWS(t, conn)
 	assertWSOK(t, read, "fs_response", "f2")
 	if got := read["data"]; got != "ship tests" {
@@ -76,17 +72,66 @@ func TestWebSocketAppInfoAndFilesystemFlow(t *testing.T) {
 	}
 }
 
+func TestWebSocketChunkedByteFilesystemFlow(t *testing.T) {
+	root := t.TempDir()
+	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
+
+	payload := bytes.Repeat([]byte("0123456789abcdef"), (fsStreamChunkSize/16)+2)
+
+	mustWriteWS(t, conn, map[string]any{"event": "fs_open_write", "id": "bw1", "path": "bytes/payload.bin"})
+	writeAck, _ := mustReadWSFrame(t, conn)
+	streamID, _ := writeAck["stream_id"].(string)
+	if streamID == "" {
+		t.Fatal("fs_open_write ack missing stream_id")
+	}
+
+	mustWriteWSFrame(t, conn, map[string]any{"event": "stream_chunk", "stream_id": streamID, "seq": 0}, payload[:fsStreamChunkSize])
+	mustWriteWSFrame(t, conn, map[string]any{"event": "stream_chunk", "stream_id": streamID, "seq": 1}, payload[fsStreamChunkSize:])
+	mustWriteWS(t, conn, map[string]any{"event": "stream_close", "id": "bw-close", "stream_id": streamID})
+	assertWSOK(t, mustReadWS(t, conn), "stream_close", "bw-close")
+
+	mustWriteWS(t, conn, map[string]any{"event": "fs_open_read", "id": "br1", "path": "bytes/payload.bin"})
+	readAck, _ := mustReadWSFrame(t, conn)
+	readStreamID, _ := readAck["stream_id"].(string)
+	if readStreamID == "" {
+		t.Fatal("fs_open_read ack missing stream_id")
+	}
+
+	var got bytes.Buffer
+	for {
+		header, chunk := mustReadWSFrame(t, conn)
+		switch header["event"] {
+		case "stream_chunk":
+			got.Write(chunk)
+		case "stream_close":
+			if sid, _ := header["stream_id"].(string); sid != readStreamID {
+				t.Fatalf("stream_close stream_id = %q, want %q", sid, readStreamID)
+			}
+			if !bytes.Equal(got.Bytes(), payload) {
+				t.Fatalf("read payload = %d bytes, want %d", got.Len(), len(payload))
+			}
+			return
+		default:
+			t.Fatalf("unexpected event %q", header["event"])
+		}
+	}
+}
+
 func TestWebSocketCapabilityGatingResponses(t *testing.T) {
 	root := t.TempDir()
-	rt, serverURL := newTestWebSocketRuntime(t, root, capabilityState{})
-	defer rt.cleanup()
+	_, conn := newTestWebSocketRuntime(t, root, capabilityState{})
 
-	conn := mustDialWS(t, serverURL)
-	defer conn.Close()
-
-	mustWriteWS(t, conn, map[string]any{"event": "fs_read", "id": "fs1", "path": "blocked.txt"})
+	mustWriteWS(t, conn, map[string]any{"event": "fs_read_text", "id": "fs1", "path": "blocked.txt"})
 	fsResp := mustReadWS(t, conn)
 	assertWSFailure(t, fsResp, "fs_response", "fs1", "filesystem capability is disabled")
+
+	mustWriteWS(t, conn, map[string]any{"event": "fs_open_read", "id": "fs2", "path": "blocked.txt"})
+	openReadResp := mustReadWS(t, conn)
+	assertWSFailure(t, openReadResp, "fs_response", "fs2", "filesystem capability is disabled")
+
+	mustWriteWS(t, conn, map[string]any{"event": "fs_open_write", "id": "fs3", "path": "blocked.txt"})
+	openWriteResp := mustReadWS(t, conn)
+	assertWSFailure(t, openWriteResp, "fs_response", "fs3", "filesystem capability is disabled")
 
 	mustWriteWS(t, conn, map[string]any{"event": "script_exec", "id": "s1", "runner": "python", "file": "tool.py"})
 	scriptResp := mustReadWS(t, conn)
@@ -104,14 +149,7 @@ func TestWebSocketWatcherPushesFSChanged(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	rt, serverURL := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
-	rt.Watcher = NewWatcher(root, 10*time.Millisecond, func(path string) error {
-		return rt.pushFSChanged(path)
-	})
-	defer rt.cleanup()
-
-	conn := mustDialWS(t, serverURL)
-	defer conn.Close()
+	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
 
 	mustWriteWS(t, conn, map[string]any{"event": "fs_watch", "id": "w1", "path": "watched.txt"})
 	assertWSOK(t, mustReadWS(t, conn), "fs_response", "w1")
@@ -134,18 +172,11 @@ func TestWebSocketWatcherPushesFSChanged(t *testing.T) {
 	t.Fatal("did not receive fs_changed notification")
 }
 
-func TestWebSocketRejectsMalformedJSONMessages(t *testing.T) {
+func TestWebSocketRejectsTextFrames(t *testing.T) {
 	root := t.TempDir()
-	rt, serverURL := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
-	defer rt.cleanup()
+	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
 
-	conn := mustDialWS(t, serverURL)
-	defer conn.Close()
-
-	if err := conn.WriteMessage(websocket.TextMessage, []byte("{not-json")); err != nil {
-		t.Fatalf("WriteMessage() error = %v", err)
-	}
-
+	mustWriteTextWS(t, conn, []byte(`{"event":"app_info","id":"t1"}`))
 	msg := mustReadWS(t, conn)
 	if got := msg["event"]; got != "error" {
 		t.Fatalf("event = %v, want error", got)
@@ -154,17 +185,27 @@ func TestWebSocketRejectsMalformedJSONMessages(t *testing.T) {
 		t.Fatalf("error payload = %#v, want string", msg["error"])
 	}
 	if _, hasID := msg["id"]; hasID {
-		t.Fatalf("id present = %#v, want omitted for malformed JSON", msg["id"])
+		t.Fatalf("id present = %#v, want omitted for text frame rejection", msg["id"])
+	}
+}
+
+func TestWebSocketRejectsMalformedBinaryFrames(t *testing.T) {
+	root := t.TempDir()
+	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
+
+	conn.reads <- fakeWSFrame{msgType: websocket.BinaryMessage, data: []byte{1, 2, 3}}
+	msg := mustReadWS(t, conn)
+	if got := msg["event"]; got != "error" {
+		t.Fatalf("event = %v, want error", got)
+	}
+	if _, ok := msg["error"].(string); !ok {
+		t.Fatalf("error payload = %#v, want string", msg["error"])
 	}
 }
 
 func TestWebSocketRejectsUnknownAndMissingEvents(t *testing.T) {
 	root := t.TempDir()
-	rt, serverURL := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
-	defer rt.cleanup()
-
-	conn := mustDialWS(t, serverURL)
-	defer conn.Close()
+	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
 
 	mustWriteWS(t, conn, map[string]any{"event": "mystery", "id": "u1"})
 	unknown := mustReadWS(t, conn)
@@ -192,70 +233,42 @@ func TestWebSocketRejectsUnknownAndMissingEvents(t *testing.T) {
 }
 
 func TestWebSocketAcceptsExactLoopbackOrigin(t *testing.T) {
-	serverURL, wsURL := newOriginTestWebSocketServer(t)
-	conn, _, err := dialWSWithOrigin(wsURL, serverURL)
-	if err != nil {
-		t.Fatalf("Dial() error = %v", err)
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.Host = "localhost:1234"
+	req.Header.Set("Origin", "http://localhost:1234")
+	if !websocketOriginAllowed(req) {
+		t.Fatal("websocketOriginAllowed() = false, want true")
 	}
-	defer conn.Close()
 }
 
 func TestWebSocketAcceptsSameLoopbackOriginHostAndPort(t *testing.T) {
-	serverURL, wsURL := newOriginTestWebSocketServer(t)
-	parsed, err := url.Parse(serverURL)
-	if err != nil {
-		t.Fatalf("url.Parse() error = %v", err)
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.Host = "127.0.0.1:1234"
+	req.Header.Set("Origin", "http://127.0.0.1:1234")
+	if !websocketOriginAllowed(req) {
+		t.Fatal("websocketOriginAllowed() = false, want true")
 	}
-	origin := "http://" + parsed.Host
-
-	conn, _, err := dialWSWithOrigin(wsURL, origin)
-	if err != nil {
-		t.Fatalf("Dial() error = %v", err)
-	}
-	defer conn.Close()
 }
 
 func TestWebSocketRejectsForeignOrigin(t *testing.T) {
-	_, wsURL := newOriginTestWebSocketServer(t)
-	conn, resp, err := dialWSWithOrigin(wsURL, "https://example.com")
-	if conn != nil {
-		defer conn.Close()
-	}
-	if err == nil {
-		t.Fatal("Dial() error = nil, want rejected upgrade")
-	}
-	if resp == nil {
-		t.Fatal("response = nil, want HTTP upgrade rejection response")
-	}
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("StatusCode = %d, want %d", resp.StatusCode, http.StatusForbidden)
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.Host = "127.0.0.1:1234"
+	req.Header.Set("Origin", "https://example.com")
+	if websocketOriginAllowed(req) {
+		t.Fatal("websocketOriginAllowed() = true, want false")
 	}
 }
 
 func TestWebSocketRejectsLoopbackOriginWithWrongPort(t *testing.T) {
-	serverURL, wsURL := newOriginTestWebSocketServer(t)
-	parsed, err := url.Parse(serverURL)
-	if err != nil {
-		t.Fatalf("url.Parse() error = %v", err)
-	}
-	wrongOrigin := "http://" + parsed.Hostname() + ":1"
-
-	conn, resp, err := dialWSWithOrigin(wsURL, wrongOrigin)
-	if conn != nil {
-		defer conn.Close()
-	}
-	if err == nil {
-		t.Fatal("Dial() error = nil, want rejected upgrade")
-	}
-	if resp == nil {
-		t.Fatal("response = nil, want HTTP upgrade rejection response")
-	}
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("StatusCode = %d, want %d", resp.StatusCode, http.StatusForbidden)
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.Host = "127.0.0.1:1234"
+	req.Header.Set("Origin", "http://127.0.0.1:1")
+	if websocketOriginAllowed(req) {
+		t.Fatal("websocketOriginAllowed() = true, want false")
 	}
 }
 
-func newTestWebSocketRuntime(t *testing.T, root string, caps capabilityState) (*Runtime, string) {
+func newTestWebSocketRuntime(t *testing.T, root string, caps capabilityState) (*Runtime, *fakeWebSocketConn) {
 	t.Helper()
 	rt := &Runtime{
 		Name:         "test-app",
@@ -267,6 +280,7 @@ func newTestWebSocketRuntime(t *testing.T, root string, caps capabilityState) (*
 		ScriptBridge: NewScriptBridge(root, time.Second),
 		ShellBridge:  NewShellBridge(root, time.Second),
 		Assets:       fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}},
+		streams:      newStreamRegistry(),
 		connections:  make(map[*wsConnection]struct{}),
 		shutdownCh:   make(chan struct{}),
 	}
@@ -274,90 +288,109 @@ func newTestWebSocketRuntime(t *testing.T, root string, caps capabilityState) (*
 		return rt.pushFSChanged(path)
 	})
 
-	server := httptest.NewServer(http.HandlerFunc(rt.serveWebSocket))
-	t.Cleanup(server.Close)
+	conn := newFakeWebSocketConn()
+	wsConn := rt.registerConnection(conn)
+	done := make(chan struct{})
+	go func() {
+		rt.handleWebSocketSession(wsConn)
+		close(done)
+	}()
 
-	parsed, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("url.Parse() error = %v", err)
-	}
-	parsed.Scheme = "ws"
-	return rt, parsed.String()
-}
-
-func newOriginTestWebSocketServer(t *testing.T) (string, string) {
-	t.Helper()
-	root := t.TempDir()
-	rt := &Runtime{
-		Name:         "origin-test-app",
-		Mode:         ModeBrowser,
-		Root:         root,
-		Capabilities: capabilityState{FS: true},
-		FSBridge:     NewFSBridge(root),
-		Watcher:      NewWatcher(root, 25*time.Millisecond, nil),
-		ScriptBridge: NewScriptBridge(root, time.Second),
-		ShellBridge:  NewShellBridge(root, time.Second),
-		Assets:       fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}},
-		connections:  make(map[*wsConnection]struct{}),
-		shutdownCh:   make(chan struct{}),
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(rt.serveWebSocket))
 	t.Cleanup(func() {
-		server.Close()
+		conn.CloseInput()
+		<-done
+		rt.unregisterConnection(wsConn)
 		_ = rt.cleanup()
 	})
 
-	parsed, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("url.Parse() error = %v", err)
-	}
-	parsed.Scheme = "ws"
-	return server.URL, parsed.String()
+	return rt, conn
 }
 
-func mustDialWS(t *testing.T, serverURL string) *websocket.Conn {
+type fakeWebSocketConn struct {
+	reads  chan fakeWSFrame
+	writes chan fakeWSFrame
+	closed chan struct{}
+	once   sync.Once
+}
+
+type fakeWSFrame struct {
+	msgType int
+	data    []byte
+	err     error
+}
+
+func newFakeWebSocketConn() *fakeWebSocketConn {
+	return &fakeWebSocketConn{
+		reads:  make(chan fakeWSFrame, 16),
+		writes: make(chan fakeWSFrame, 16),
+		closed: make(chan struct{}),
+	}
+}
+
+func (f *fakeWebSocketConn) ReadMessage() (int, []byte, error) {
+	select {
+	case frame, ok := <-f.reads:
+		if !ok {
+			return 0, nil, io.EOF
+		}
+		return frame.msgType, append([]byte(nil), frame.data...), frame.err
+	case <-f.closed:
+		return 0, nil, io.EOF
+	}
+}
+
+func (f *fakeWebSocketConn) WriteMessage(msgType int, data []byte) error {
+	frame := fakeWSFrame{msgType: msgType, data: append([]byte(nil), data...)}
+	select {
+	case f.writes <- frame:
+		return nil
+	case <-f.closed:
+		return io.EOF
+	}
+}
+
+func (f *fakeWebSocketConn) Close() error {
+	f.CloseInput()
+	return nil
+}
+
+func (f *fakeWebSocketConn) CloseInput() {
+	f.once.Do(func() {
+		close(f.closed)
+		close(f.reads)
+	})
+}
+
+func mustWriteWS(t *testing.T, conn *fakeWebSocketConn, payload map[string]any) {
 	t.Helper()
-	parsed, err := url.Parse(serverURL)
+	data, err := encodeFrame(payload, nil)
 	if err != nil {
-		t.Fatalf("url.Parse() error = %v", err)
+		t.Fatalf("encodeFrame() error = %v", err)
 	}
-	headers := http.Header{}
-	headers.Set("Origin", "http://"+parsed.Host)
-	conn, _, err := websocket.DefaultDialer.Dial(serverURL, headers)
-	if err != nil {
-		t.Fatalf("Dial() error = %v", err)
-	}
-	return conn
+	conn.reads <- fakeWSFrame{msgType: websocket.BinaryMessage, data: data}
 }
 
-func dialWSWithOrigin(serverURL string, origin string) (*websocket.Conn, *http.Response, error) {
-	headers := http.Header{}
-	headers.Set("Origin", origin)
-	return websocket.DefaultDialer.Dial(serverURL, headers)
-}
-
-func mustWriteWS(t *testing.T, conn *websocket.Conn, payload map[string]any) {
+func mustWriteTextWS(t *testing.T, conn *fakeWebSocketConn, data []byte) {
 	t.Helper()
-	if err := conn.WriteJSON(payload); err != nil {
-		t.Fatalf("WriteJSON() error = %v", err)
-	}
+	conn.reads <- fakeWSFrame{msgType: websocket.TextMessage, data: append([]byte(nil), data...)}
 }
 
-func mustReadWS(t *testing.T, conn *websocket.Conn) map[string]any {
+func mustReadWS(t *testing.T, conn *fakeWebSocketConn) map[string]any {
 	t.Helper()
-	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
-		t.Fatalf("SetReadDeadline() error = %v", err)
+	select {
+	case frame := <-conn.writes:
+		if frame.msgType != websocket.BinaryMessage {
+			t.Fatalf("message type = %d, want binary", frame.msgType)
+		}
+		var msg map[string]any
+		if _, err := decodeFrame(frame.data, &msg); err != nil {
+			t.Fatalf("decodeFrame() error = %v; data=%s", err, string(frame.data))
+		}
+		return msg
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for websocket response")
 	}
-	_, data, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("ReadMessage() error = %v", err)
-	}
-	var msg map[string]any
-	if err := json.Unmarshal(data, &msg); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v; data=%s", err, string(data))
-	}
-	return msg
+	return nil
 }
 
 func assertWSOK(t *testing.T, msg map[string]any, event string, id string) {
@@ -394,5 +427,3 @@ func truthyMapValue(values map[string]any, key string) bool {
 	v, _ := values[key].(bool)
 	return v
 }
-
-var _ fs.FS = fstest.MapFS{}

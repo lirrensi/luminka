@@ -20,6 +20,7 @@ func main() {
 	if err := luminka.Run(luminka.Config{
 		Name:            "luminka-kanban",
 		Mode:            appMode(),
+		RootPolicy:      luminka.RootPolicyPortable,
 		WindowTitle:     "luminka-kanban",
 		WindowWidth:     1280,
 		WindowHeight:    800,

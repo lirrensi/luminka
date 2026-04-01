@@ -223,6 +223,16 @@ Important:
 - **Scripts are not enabled just because code exists**. You must compile with `-tags scripts` **and** set `EnableScripts: true`.
 - **Shell is full-trust mode**. It is not a sandbox or “safe mode”. You must compile with `-tags shell` **and** set `EnableShell: true`.
 
+### Runtime launch flags
+
+The host app also understands these runtime flags:
+
+- `--root <path>`
+- `--root-policy <portable|detached>`
+- `--portable`
+- `--detached`
+- `--headless`
+
 ### Script locations
 
 Scripts can be resolved in two ways:
@@ -267,6 +277,9 @@ new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" })
 - `client.disconnect()` closes the socket and rejects pending requests.
 - Capability-disabled calls fail explicitly.
 - `appInfo()` reports the resolved runtime capabilities so your frontend can adapt.
+- Text helpers: `readText()` / `writeText()`; aliases: `read()` / `write()`.
+- Byte helpers: `readBytes()` / `writeBytes()`.
+- Stream helpers: `createReadStream()` / `createWriteStream()` and `runScriptStream()` / `runShellStream()`.
 
 If you call filesystem, script, or shell APIs when the capability is unavailable, expect an explicit runtime error rather than silent fallback.
 
@@ -308,6 +321,8 @@ go build -tags shell ./starter
 ```
 
 Windows helpers live in each app folder as `build.bat` and `build_webview.bat`.
+
+Starter Windows builds now run `npm run build:sdk`, `npm run build:icons`, `go-winres make`, and `go build` in that order.
 
 ## Webview friction notes
 

@@ -38,11 +38,21 @@ type wsMessage struct {
 	Name         string          `json:"name,omitempty"`
 	Mode         Mode            `json:"mode,omitempty"`
 	Root         string          `json:"root,omitempty"`
+	StreamID     string          `json:"stream_id,omitempty"`
+	Seq          uint64          `json:"seq,omitempty"`
+	Lane         string          `json:"lane,omitempty"`
+	EOF          bool            `json:"eof,omitempty"`
 	Capabilities capabilityState `json:"capabilities,omitempty"`
 }
 
+type websocketConn interface {
+	ReadMessage() (int, []byte, error)
+	WriteMessage(int, []byte) error
+	Close() error
+}
+
 type wsConnection struct {
-	conn    *websocket.Conn
+	conn    websocketConn
 	writeMu sync.Mutex
 }
 
@@ -67,28 +77,36 @@ func (m wsMessage) MarshalJSON() ([]byte, error) {
 		Name         string           `json:"name,omitempty"`
 		Mode         Mode             `json:"mode,omitempty"`
 		Root         string           `json:"root,omitempty"`
+		StreamID     string           `json:"stream_id,omitempty"`
+		Seq          uint64           `json:"seq,omitempty"`
+		Lane         string           `json:"lane,omitempty"`
+		EOF          bool             `json:"eof,omitempty"`
 		Capabilities *capabilityState `json:"capabilities,omitempty"`
 	}
 	out := wire{
-		Event:   m.Event,
-		ID:      m.ID,
-		Ok:      m.Ok,
-		Error:   m.Error,
-		Path:    m.Path,
-		Data:    m.Data,
-		Files:   m.Files,
-		Exists:  m.Exists,
-		Runner:  m.Runner,
-		File:    m.File,
-		Cmd:     m.Cmd,
-		Args:    m.Args,
-		Timeout: m.Timeout,
-		Stdout:  m.Stdout,
-		Stderr:  m.Stderr,
-		Code:    m.Code,
-		Name:    m.Name,
-		Mode:    m.Mode,
-		Root:    m.Root,
+		Event:    m.Event,
+		ID:       m.ID,
+		Ok:       m.Ok,
+		Error:    m.Error,
+		Path:     m.Path,
+		Data:     m.Data,
+		Files:    m.Files,
+		Exists:   m.Exists,
+		Runner:   m.Runner,
+		File:     m.File,
+		Cmd:      m.Cmd,
+		Args:     m.Args,
+		Timeout:  m.Timeout,
+		Stdout:   m.Stdout,
+		Stderr:   m.Stderr,
+		Code:     m.Code,
+		Name:     m.Name,
+		Mode:     m.Mode,
+		Root:     m.Root,
+		StreamID: m.StreamID,
+		Seq:      m.Seq,
+		Lane:     m.Lane,
+		EOF:      m.EOF,
 	}
 	if m.Event == "app_info" || m.Capabilities != (capabilityState{}) {
 		caps := m.Capabilities
@@ -113,16 +131,25 @@ func (rt *Runtime) serveWebSocket(w http.ResponseWriter, r *http.Request) {
 		rt.unregisterConnection(wsConn)
 		_ = conn.Close()
 	}()
+	rt.handleWebSocketSession(wsConn)
+}
+
+func (rt *Runtime) handleWebSocketSession(wsConn *wsConnection) {
+	if rt == nil || wsConn == nil {
+		return
+	}
 
 	for {
-		_, msg, err := conn.ReadMessage()
+		msgType, request, payload, err := readWSFrame(wsConn)
 		if err != nil {
+			if msgType == websocket.BinaryMessage {
+				_ = writeErrorResponse(wsConn, nil, err.Error())
+				continue
+			}
 			return
 		}
-
-		var request wsMessage
-		if err := json.Unmarshal(msg, &request); err != nil {
-			_ = writeErrorResponse(wsConn, nil, err.Error())
+		if msgType == websocket.TextMessage {
+			_ = writeErrorResponse(wsConn, nil, "websocket text frames are not supported")
 			continue
 		}
 		if request.Event == "" {
@@ -141,12 +168,16 @@ func (rt *Runtime) serveWebSocket(w http.ResponseWriter, r *http.Request) {
 				Root:         rt.Root,
 				Capabilities: rt.Capabilities,
 			})
-		case "fs_read", "fs_write", "fs_list", "fs_delete", "fs_exists", "fs_watch", "fs_unwatch":
-			_ = rt.handleFilesystemRequest(wsConn, request)
+		case "fs_read_text", "fs_write_text", "fs_list", "fs_delete", "fs_exists", "fs_watch", "fs_unwatch", "fs_open_read", "fs_open_write", "stream_chunk", "stream_close":
+			_ = rt.handleFilesystemRequest(wsConn, request, payload)
 		case "script_exec":
 			_ = rt.handleScriptRequest(wsConn, request)
+		case "script_exec_stream":
+			_ = rt.handleScriptStreamRequest(wsConn, request)
 		case "shell_exec":
 			_ = rt.handleShellRequest(wsConn, request)
+		case "shell_exec_stream":
+			_ = rt.handleShellStreamRequest(wsConn, request)
 		default:
 			_ = writeErrorResponse(wsConn, request.ID, fmt.Sprintf("unknown event %q", request.Event))
 		}
@@ -190,7 +221,7 @@ func isLoopbackOriginHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func (rt *Runtime) registerConnection(conn *websocket.Conn) *wsConnection {
+func (rt *Runtime) registerConnection(conn websocketConn) *wsConnection {
 	if rt == nil || conn == nil {
 		return nil
 	}
@@ -212,6 +243,9 @@ func (rt *Runtime) registerConnection(conn *websocket.Conn) *wsConnection {
 func (rt *Runtime) unregisterConnection(conn *wsConnection) {
 	if rt == nil || conn == nil {
 		return
+	}
+	if rt.streams != nil {
+		rt.streams.closeConnection(conn)
 	}
 
 	rt.mu.Lock()
@@ -259,68 +293,6 @@ func (rt *Runtime) connectionSnapshot() []*wsConnection {
 		out = append(out, conn)
 	}
 	return out
-}
-
-func (rt *Runtime) handleFilesystemRequest(conn *wsConnection, request wsMessage) error {
-	if rt == nil {
-		return writeErrorResponse(conn, request.ID, "runtime is required")
-	}
-	if !rt.Capabilities.FS {
-		return writeFSResponse(conn, request.ID, false, "filesystem capability is disabled", nil, nil, nil)
-	}
-	if rt.FSBridge == nil {
-		return writeFSResponse(conn, request.ID, false, "filesystem bridge is unavailable", nil, nil, nil)
-	}
-
-	switch request.Event {
-	case "fs_read":
-		data, err := rt.FSBridge.Read(request.Path)
-		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
-		}
-		return writeFSResponse(conn, request.ID, true, "", &data, nil, nil)
-	case "fs_write":
-		if err := rt.FSBridge.Write(request.Path, request.Data); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
-		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_list":
-		files, err := rt.FSBridge.List(request.Path)
-		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
-		}
-		return writeFSResponse(conn, request.ID, true, "", nil, files, nil)
-	case "fs_delete":
-		if err := rt.FSBridge.Delete(request.Path); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
-		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_exists":
-		exists, err := rt.FSBridge.Exists(request.Path)
-		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
-		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, boolPtr(exists))
-	case "fs_watch":
-		if rt.Watcher == nil {
-			return writeFSResponse(conn, request.ID, false, "watcher is unavailable", nil, nil, nil)
-		}
-		if err := rt.Watcher.Add(request.Path); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
-		}
-		rt.Watcher.Start()
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_unwatch":
-		if rt.Watcher == nil {
-			return writeFSResponse(conn, request.ID, false, "watcher is unavailable", nil, nil, nil)
-		}
-		if err := rt.Watcher.Remove(request.Path); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
-		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	default:
-		return writeErrorResponse(conn, request.ID, fmt.Sprintf("unknown event %q", request.Event))
-	}
 }
 
 func (rt *Runtime) handleScriptRequest(conn *wsConnection, request wsMessage) error {
@@ -374,35 +346,6 @@ func pushWSMessage(rt *Runtime, message wsMessage) error {
 		}
 	}
 	return firstErr
-}
-
-func writeWSMessage(conn *wsConnection, message wsMessage) error {
-	if conn == nil || conn.conn == nil {
-		return fmt.Errorf("websocket connection is required")
-	}
-	data, err := json.Marshal(message)
-	if err != nil {
-		return err
-	}
-	conn.writeMu.Lock()
-	defer conn.writeMu.Unlock()
-	return conn.conn.WriteMessage(websocket.TextMessage, data)
-}
-
-func writeErrorResponse(conn *wsConnection, id json.RawMessage, message string) error {
-	return writeWSMessage(conn, wsMessage{Event: "error", ID: id, Error: message})
-}
-
-func writeFSResponse(conn *wsConnection, id json.RawMessage, ok bool, errMsg string, data *string, files []string, exists *bool) error {
-	response := wsMessage{Event: "fs_response", ID: id, Ok: boolPtr(ok), Error: errMsg, Files: files, Exists: exists}
-	if data != nil {
-		response.Data = *data
-	}
-	return writeWSMessage(conn, response)
-}
-
-func writeExecResponse(conn *wsConnection, event string, id json.RawMessage, ok bool, errMsg, stdout, stderr string, code *int) error {
-	return writeWSMessage(conn, wsMessage{Event: event, ID: id, Ok: boolPtr(ok), Error: errMsg, Stdout: stdout, Stderr: stderr, Code: code})
 }
 
 func requestTimeout(seconds int) time.Duration {

@@ -7,7 +7,6 @@
 package luminka
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -114,23 +113,15 @@ func TestBuildAssetHandlerServesStaticSubtreeWhenPresent(t *testing.T) {
 		t.Fatalf("buildAssetHandler() error = %v", err)
 	}
 
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
+	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	rr := httptest.NewRecorder()
 
-	resp, err := http.Get(server.URL + "/app.js")
-	if err != nil {
-		t.Fatalf("http.Get() error = %v", err)
-	}
-	defer resp.Body.Close()
+	handler.ServeHTTP(rr, req)
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
 	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	if got := string(body); got != "console.log('static')" {
+	if got := rr.Body.String(); got != "console.log('static')" {
 		t.Fatalf("body = %q, want static asset", got)
 	}
 }

@@ -9,6 +9,8 @@
 package luminka
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,6 +77,87 @@ func TestScriptBridgeRejectsMissingInternalBundleAndFile(t *testing.T) {
 	}
 }
 
+func TestScriptBridgeExecStreamStreamsStdout(t *testing.T) {
+	root := t.TempDir()
+	runner := buildScriptReaderRunner(t, root)
+	if err := os.WriteFile(filepath.Join(root, "external.txt"), []byte("stream-ok"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	sb := &ScriptBridge{root: root, defaultTimeout: time.Second}
+	rt := &Runtime{streams: newStreamRegistry()}
+	conn := newFakeWebSocketConn()
+	wsConn := &wsConnection{conn: conn}
+
+	if err := sb.ExecStream(rt, wsConn, json.RawMessage(`"s1"`), runner, "external.txt", nil, 0); err != nil {
+		t.Fatalf("ExecStream() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	for {
+		header, payload := mustReadWSFrame(t, conn)
+		switch header["event"] {
+		case "stream_chunk":
+			if lane, _ := header["lane"].(string); lane != "stdout" {
+				t.Fatalf("lane = %q, want stdout", lane)
+			}
+			stdout.Write(payload)
+		case "script_response":
+			assertWSOK(t, header, "script_response", "s1")
+			if code, _ := header["code"].(float64); code != 0 {
+				t.Fatalf("code = %v, want 0", header["code"])
+			}
+			if sid, _ := header["stream_id"].(string); sid == "" {
+				t.Fatal("script_response missing stream_id")
+			}
+			if got := stdout.String(); got != "stream-ok" {
+				t.Fatalf("stdout = %q, want stream-ok", got)
+			}
+			return
+		default:
+			t.Fatalf("unexpected event %q", header["event"])
+		}
+	}
+}
+
+func TestScriptBridgeExecStreamReportsNonZeroExitCode(t *testing.T) {
+	root := t.TempDir()
+	runner := buildScriptExitRunner(t, root)
+	if err := os.WriteFile(filepath.Join(root, "external.txt"), []byte("exit-ok"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	sb := &ScriptBridge{root: root, defaultTimeout: time.Second}
+	rt := &Runtime{streams: newStreamRegistry()}
+	conn := newFakeWebSocketConn()
+	wsConn := &wsConnection{conn: conn}
+
+	if err := sb.ExecStream(rt, wsConn, json.RawMessage(`"s2"`), runner, "external.txt", nil, 0); err != nil {
+		t.Fatalf("ExecStream() error = %v", err)
+	}
+
+	for {
+		header, _ := mustReadWSFrame(t, conn)
+		switch header["event"] {
+		case "stream_chunk":
+			// keep draining until final response
+		case "script_response":
+			if ok, _ := header["ok"].(bool); ok {
+				t.Fatal("script_response ok = true, want false for non-zero exit")
+			}
+			if code, _ := header["code"].(float64); code != 7 {
+				t.Fatalf("code = %v, want 7", header["code"])
+			}
+			if sid, _ := header["stream_id"].(string); sid == "" {
+				t.Fatal("script_response missing stream_id")
+			}
+			return
+		default:
+			t.Fatalf("unexpected event %q", header["event"])
+		}
+	}
+}
+
 func buildScriptReaderRunner(t *testing.T, dir string) string {
 	t.Helper()
 	goMod := filepath.Join(dir, "go.mod")
@@ -87,6 +170,26 @@ func buildScriptReaderRunner(t *testing.T, dir string) string {
 	}
 
 	out := filepath.Join(dir, "runner"+exeSuffix())
+	cmd := exec.Command("go", "build", "-o", out, source)
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build runner failed: %v\n%s", err, string(output))
+	}
+	return out
+}
+
+func buildScriptExitRunner(t *testing.T, dir string) string {
+	t.Helper()
+	goMod := filepath.Join(dir, "go.mod")
+	if err := os.WriteFile(goMod, []byte("module runner\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	source := filepath.Join(dir, "runner_exit.go")
+	if err := os.WriteFile(source, []byte(scriptExitRunnerSource), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	out := filepath.Join(dir, "runner-exit"+exeSuffix())
 	cmd := exec.Command("go", "build", "-o", out, source)
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -119,4 +222,24 @@ func main() {
 		os.Exit(3)
 	}
 	fmt.Print(string(data))
+}`
+
+const scriptExitRunnerSource = `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if len(os.Args) < 2 {
+		os.Exit(2)
+	}
+	data, err := os.ReadFile(os.Args[1])
+	if err != nil {
+		fmt.Fprint(os.Stderr, err.Error())
+		os.Exit(3)
+	}
+	fmt.Print(string(data))
+	os.Exit(7)
 }`

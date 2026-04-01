@@ -60,6 +60,16 @@ go build ./starter
 go build -tags webview ./starter
 ```
 
+### Luminka launch flags
+
+The runtime also recognizes these flags:
+
+- `--root <path>`
+- `--root-policy <portable|detached>`
+- `--portable`
+- `--detached`
+- `--headless`
+
 ### B. Capability support
 
 These are separate from browser/webview.
@@ -176,6 +186,9 @@ const client = new LuminkaClient({
 - `connect()` opens or reuses the socket
 - `disconnect()` closes it and rejects pending work
 - failed connection attempts produce explicit errors
+- `readText()` / `writeText()` are the primary text helpers; `read()` / `write()` remain aliases
+- `readBytes()` / `writeBytes()` handle raw file bytes
+- `createReadStream()` / `createWriteStream()` and `runScriptStream()` / `runShellStream()` expose byte streams
 
 ### Capability failures
 
@@ -220,12 +233,13 @@ Do not debug all of Luminka first. Prove the browser build, then isolate the web
 
 1. `npm install`
 2. `npm run build:sdk`
-3. `go build ./starter`
-4. run the starter app
-5. edit `starter/main.go` to rename the app
-6. edit `starter/dist/app.js` or `starter/dist/index.html`
-7. rebuild and rerun
-8. only then try `-tags webview`
+3. `npm run build:icons` if you want the starter icon outputs and Windows resource files
+4. `go build ./starter`
+5. run the starter app
+6. edit `starter/main.go` to rename the app
+7. edit `starter/dist/app.js` or `starter/dist/index.html`
+8. rebuild and rerun
+9. only then try `-tags webview`
 
 ## 12. Canon docs if you need deeper truth
 

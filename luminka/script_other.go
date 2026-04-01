@@ -9,6 +9,7 @@
 package luminka
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"time"
@@ -30,4 +31,8 @@ func scriptSupportAvailable() bool {
 
 func (sb *ScriptBridge) Exec(runner string, file string, args []string, timeout time.Duration) (stdout string, stderr string, code int, err error) {
 	return "", "", -1, errors.New("script support is not available in this build; rebuild with -tags scripts")
+}
+
+func (sb *ScriptBridge) ExecStream(rt *Runtime, conn *wsConnection, id json.RawMessage, runner string, file string, args []string, timeout time.Duration) error {
+	return errors.New("script support is not available in this build; rebuild with -tags scripts")
 }
