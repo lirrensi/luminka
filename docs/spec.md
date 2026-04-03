@@ -145,6 +145,10 @@ A conforming Luminka product implementation SHOULD provide both browser and webv
 
 The reference repository is expected to provide both profiles even though a single built binary uses one profile at runtime.
 
+The reference repository's public Go module identity is `github.com/lirrensi/luminka`.
+
+The reference repository's direct runtime import lane is expected to remain `github.com/lirrensi/luminka/luminka`.
+
 A conforming product implementation SHOULD provide both root policies and headless launch behavior.
 
 ### Capability Conformance
@@ -531,6 +535,16 @@ A Luminka app configuration MUST include conceptually equivalent fields to the f
 | `exec_timeout` | Default process execution timeout | 30s |
 
 The exact configuration surface MAY differ by implementation language.
+
+### SDK Distribution Surface
+
+Luminka's canonical SDK source is the TypeScript file `luminka/sdk/luminka.ts` in the reference repository.
+
+A conforming repository implementation MAY additionally provide generated JavaScript artifacts for browser-ready or tool-light consumption.
+
+If generated JavaScript artifacts are provided, the reference repository SHOULD expose them through a stable path under `sdk/dist/`.
+
+Providing generated artifacts does not replace the canonical TypeScript source. Both source consumption and generated-artifact consumption are valid adoption lanes.
 
 ### Instance State
 

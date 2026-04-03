@@ -34,7 +34,7 @@ The flow is simple:
 4. Compile the Go app.
 5. Run the resulting `.exe` anywhere you want.
 
-If you import Luminka directly, rebuild the SDK copies with `npm run build:sdk` so your frontend and embedded runtime stay in sync.
+If you import Luminka directly, rebuild the SDK outputs with `npm run build:sdk` so the TypeScript source, generated browser artifact, and embedded copies stay in sync.
 
 If you want runtime access to the filesystem, bundled scripts, or shell commands, use the Luminka SDK to talk to the host and enable the capabilities you need.
 
@@ -109,10 +109,13 @@ If you already have your own app and do not want to copy this repo first, use Lu
 In that flow:
 
 - keep your own frontend project separate,
-- compile your own SDK outputs separately,
-- and embed the generated `luminka.js` files in your app build.
+- import the runtime package from `github.com/lirrensi/luminka/luminka`,
+- choose either the TypeScript SDK source at `luminka/sdk/luminka.ts` or the generated browser artifact at `sdk/dist/luminka.js`,
+- and embed the generated `luminka.js` files in your app build when you want the in-repo starter/example copies.
 
-The SDK source of truth is [`luminka/sdk/luminka.ts`](luminka/sdk/luminka.ts), and `npm run build:sdk` regenerates the browser-ready copies.
+The public Go module path is `github.com/lirrensi/luminka`. The runtime package stays under `luminka/`, so the direct Go import path is `github.com/lirrensi/luminka/luminka`.
+
+The SDK source of truth is [`luminka/sdk/luminka.ts`](luminka/sdk/luminka.ts), and `npm run build:sdk` regenerates both the stable external artifact at `sdk/dist/luminka.js` and the embedded browser-ready copies.
 
 ## Which app should I open?
 
@@ -153,11 +156,14 @@ npm install
 npm run build:sdk
 ```
 
-This transpiles `luminka/sdk/luminka.ts` and writes generated `luminka.js` copies into:
+This transpiles `luminka/sdk/luminka.ts` and writes generated `luminka.js` outputs into:
 
+- `sdk/dist/`
 - `starter/dist/`
 - `examples/hello/dist/`
 - `examples/kanban/dist/`
+
+Use `luminka/sdk/luminka.ts` when you want direct TypeScript source consumption, or `sdk/dist/luminka.js` when you want a ready-to-embed generated JavaScript artifact.
 
 ### 3) Build the starter app
 
@@ -264,11 +270,12 @@ If you are turning `starter/` into your app, these are the first places to edit:
 | Frontend behavior | `starter/dist/app.js` |
 | Frontend styles | `starter/dist/style.css` |
 | SDK source of truth | `luminka/sdk/luminka.ts` |
+| Generated SDK artifact | `sdk/dist/luminka.js` |
 | Regenerate embedded SDK copies | `npm run build:sdk` |
 
 ## SDK behavior you should know early
 
-The frontend SDK lives at `luminka/sdk/luminka.ts`.
+The frontend SDK lives at `luminka/sdk/luminka.ts` and is also emitted as `sdk/dist/luminka.js`.
 
 Key expectations:
 
@@ -305,7 +312,8 @@ If you call filesystem, script, or shell APIs when the capability is unavailable
 
 ## Repo shape
 
-- `luminka/` — Go runtime core
+- `luminka/` — Go runtime core (`github.com/lirrensi/luminka/luminka`)
+- `sdk/dist/` — generated browser-ready SDK artifact
 - `luminka/sdk/` — TypeScript SDK source of truth
 - `starter/` — main adoption path
 - `examples/hello/` — smallest example, no filesystem capability

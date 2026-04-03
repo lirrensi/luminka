@@ -23,7 +23,7 @@ Luminka is for developers who:
 - want a small local runtime instead of a heavy browser app shell,
 - want explicit control over local capabilities,
 - want a simple starter they can clone and edit,
-- may later want to import the framework directly into their own repo.
+- may later want to import the runtime directly into their own repo through the public Go module path.
 
 It is especially aimed at small local-first tools, internal utilities, mini-apps, personal software, and workflow helpers.
 
@@ -69,6 +69,11 @@ The app binary should be easy to copy around or install once and reuse. The UI s
 
 Luminka is a framework, but it should still be easy to adopt by cloning a starter, dropping in a frontend build, and editing from there.
 
+That starter-friendly path must not crowd out the direct-import path. The intended adoption story has two equal lanes:
+
+- clone `starter/` and reshape it into your app,
+- or import the runtime from `github.com/lirrensi/luminka/luminka` and wire Luminka into your own repo structure.
+
 ### No fake safety story
 
 If a developer enables powerful local capabilities, the frontend is trusted local code. Luminka does not pretend otherwise.
@@ -103,7 +108,7 @@ A developer launches a Luminka app in headless mode so it starts serving locally
 
 ### 7. Start from the starter, then grow beyond it
 
-A developer can begin by cloning the official starter, replacing the frontend, renaming the app, and building it. If they outgrow that flow, they can import Luminka more directly and structure their own repo around it.
+A developer can begin by cloning the official starter, replacing the frontend, renaming the app, and building it. If they outgrow that flow, they can import Luminka more directly from `github.com/lirrensi/luminka/luminka` and structure their own repo around it.
 
 ## System Shape
 
@@ -116,7 +121,7 @@ At a high level, Luminka has four parts:
    The wire-level contract between frontend and runtime, including chunked byte streams for file transfer and live process output.
 
 3. **TypeScript SDK**  
-   A small in-repo client helper that hides transport details behind Node-inspired functions and stream helpers.
+   A small in-repo client helper that hides transport details behind Node-inspired functions and stream helpers. The TypeScript source remains canonical, but Luminka should support both direct source consumption and generated JavaScript distribution artifacts.
 
 4. **Starter and example apps**  
    A minimal starter for adoption and example apps, including kanban, that prove the framework shape in practice.
@@ -153,3 +158,8 @@ That shape supports both intended adoption paths:
 
 - clone the starter and make it yours,
 - or import Luminka more directly in a custom repo.
+
+For SDK consumers, the reference repo should keep one TypeScript source of truth while supporting two equal consumption paths:
+
+- import the SDK source directly from `luminka/sdk/luminka.ts`,
+- or use generated JavaScript artifacts from `sdk/dist/`.

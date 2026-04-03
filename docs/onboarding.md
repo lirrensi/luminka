@@ -11,8 +11,11 @@ The important paths are:
 - `starter/` — the thing you should usually edit first
 - `examples/hello/` — tiny example, intentionally limited
 - `examples/kanban/` — richer example with real file persistence
-- `luminka/` — the shared Go runtime
-- `luminka/sdk/luminka.ts` — the SDK source of truth
+- `luminka/` — the shared Go runtime package (`github.com/lirrensi/luminka/luminka`)
+- `luminka/sdk/luminka.ts` — the SDK source of truth for direct TypeScript consumption
+- `sdk/dist/luminka.js` — generated JavaScript artifact for direct browser embedding
+
+The public Go module path for the repo is `github.com/lirrensi/luminka`.
 
 ## 2. Install prerequisites
 
@@ -80,7 +83,7 @@ Result:
 npm run build:sdk
 ```
 
-Use this when you changed `luminka/sdk/luminka.ts` and want fresh generated `luminka.js` copies in `starter/` and the examples.
+Use this when you changed `luminka/sdk/luminka.ts` and want fresh generated outputs in `sdk/dist/`, `starter/`, and the examples.
 
 ### Rebuild icons only
 
@@ -248,6 +251,11 @@ Use this when you want to see a more complete local-first app flow:
 
 The SDK is browser-first.
 
+There are two equal consumption lanes from the same source of truth:
+
+- import the TypeScript source directly from `luminka/sdk/luminka.ts`
+- use the generated JavaScript artifact at `sdk/dist/luminka.js`
+
 ### Default connection behavior
 
 In a Luminka-hosted frontend, `createLuminkaClient()` uses `location.host` to infer `ws://<host>/ws`.
@@ -291,8 +299,9 @@ If you edit `luminka/sdk/luminka.ts`, run:
 npm run build:sdk
 ```
 
-That updates the generated `luminka.js` copies embedded by:
+That updates the generated `luminka.js` artifact and the embedded copies used by:
 
+- `sdk/dist/`
 - `starter/`
 - `examples/hello/`
 - `examples/kanban/`

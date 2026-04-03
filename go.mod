@@ -1,4 +1,4 @@
-module luminka
+module github.com/lirrensi/luminka
 
 go 1.22
 

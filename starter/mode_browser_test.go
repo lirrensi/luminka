@@ -5,7 +5,7 @@ package main
 import (
 	"testing"
 
-	"luminka/luminka"
+	"github.com/lirrensi/luminka/luminka"
 )
 
 func TestAppModeBrowserBuild(t *testing.T) {

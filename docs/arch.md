@@ -46,6 +46,10 @@ The target repository shape is:
     sdk/
       luminka.ts
 
+  sdk/
+    dist/
+      luminka.js
+
   starter/
     main.go
     dist/
@@ -60,6 +64,8 @@ The target repository shape is:
 ```
 
 There SHOULD be no application Go entrypoint at repository root.
+
+The shared runtime package intentionally remains under `luminka/` so the public import path stays `github.com/lirrensi/luminka/luminka` while the repository root remains tidy and framework-oriented.
 
 ## Components
 
@@ -235,6 +241,13 @@ Responsibilities:
 - stay thin enough that direct protocol access remains possible.
 
 The SDK is in-repo and first-class, but not a standalone npm product.
+
+The TypeScript file remains the source of truth. The repository also owns a generated JavaScript distribution surface under `sdk/dist/` for consumers who want a ready-to-embed browser artifact without importing the TypeScript source directly.
+
+Both consumption lanes are first-class:
+
+- direct source consumption from `luminka/sdk/luminka.ts`,
+- generated artifact consumption from `sdk/dist/*`.
 
 ### 12. Packaging Hooks
 
@@ -432,6 +445,7 @@ Operational expectations:
 
 - Current runtime package: `luminka/*`
 - Current SDK source of truth: `luminka/sdk/luminka.ts`
+- Generated SDK distribution surface: `sdk/dist/*`
 - Transitional architecture source: `agent_chat/plan_luminka_architecture_2026-03-30.md`
 
 These pointers are informative only. The canon is this document plus the rest of `docs/`.

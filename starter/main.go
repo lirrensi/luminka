@@ -10,7 +10,7 @@ import (
 	"embed"
 	"log"
 
-	"luminka/luminka"
+	"github.com/lirrensi/luminka/luminka"
 )
 
 //go:embed dist/*
