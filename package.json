@@ -6,7 +6,8 @@
     "scripts": {
         "build:sdk": "tsx scripts/build_sdk.ts",
         "build:icons": "tsx scripts/build_icons.ts",
-        "build:starter": "npm run build:sdk",
+        "build:starter": "starter\\build.bat",
+        "build:starter:webview": "starter\\build_webview.bat",
         "build:examples": "npm run build:sdk",
         "build:all": "npm run build:sdk",
         "test:sdk": "tsx --test luminka/sdk/luminka.test.ts"

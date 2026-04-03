@@ -34,9 +34,10 @@ That installs the local JS tooling used by this repo, including `tsx` and `types
 Start with the **starter app in browser mode**.
 
 ```bash
-npm run build:sdk
-go build ./starter
+npm run build:starter
 ```
+
+That gives you a browser-mode starter `.exe` at repo root.
 
 Why this first?
 
@@ -44,7 +45,89 @@ Why this first?
 - easiest way to prove the repo is healthy
 - best place to start editing your own app
 
-## 4. Understand the two build axes
+## 4. Starter recipes you can copy-paste
+
+If you want a specific starter outcome, use one of these.
+
+### Browser starter build at repo root
+
+```bash
+npm run build:starter
+```
+
+Result:
+
+- builds `luminka-starter.exe` at repo root
+- browser mode
+- Windows GUI build path
+- includes SDK regeneration, icon generation, and Windows resource generation
+
+### Webview starter build at repo root
+
+```bash
+npm run build:starter:webview
+```
+
+Result:
+
+- builds `luminka-starter-webview.exe` at repo root
+- webview mode
+- Windows GUI build path
+
+### Rebuild the SDK only
+
+```bash
+npm run build:sdk
+```
+
+Use this when you changed `luminka/sdk/luminka.ts` and want fresh generated `luminka.js` copies in `starter/` and the examples.
+
+### Rebuild icons only
+
+```bash
+npm run build:icons
+```
+
+Use this when you changed the starter icon source asset and want fresh Windows, macOS, and Linux icon outputs.
+
+### Plain generic Go starter build
+
+```bash
+go build ./starter
+```
+
+Use this when you want the simplest generic Go compilation path.
+
+Important on Windows:
+
+- this is **not** the canonical no-console starter build
+- it produces a foreground console build unless you supply the GUI subsystem flag yourself
+
+### Run the starter in detached mode
+
+```bash
+.\luminka-starter.exe --detached
+```
+
+Use this when the current working directory should become the app root.
+
+### Run the starter in headless mode
+
+```bash
+.\luminka-starter.exe --headless
+```
+
+Use this when you want the local server and capability bridge without opening browser or webview shell.
+
+### Run the starter in detached + headless mode
+
+```bash
+.\luminka-starter.exe --detached --headless
+```
+
+Use this when you want one installed binary serving the current directory without opening UI.
+
+## 5. Understand the two build axes
 
 There are two different choices in Luminka.
 
@@ -86,7 +169,7 @@ Capabilities are not only a runtime toggle. Some are also compile-time gated.
 | Scripts | Yes: `scripts` | Yes: `EnableScripts: true` |
 | Shell | Yes: `shell` | Yes: `EnableShell: true` |
 
-## 5. Know the default behavior before you are surprised
+## 6. Know the default behavior before you are surprised
 
 ### Filesystem
 
@@ -107,7 +190,7 @@ Capabilities are not only a runtime toggle. Some are also compile-time gated.
 - This is unrestricted local command execution.
 - It is **full trust**, not a sandbox.
 
-## 6. If you want to make a real app, start in `starter/`
+## 7. If you want to make a real app, start in `starter/`
 
 `starter/` is the handoff path from framework repo to your app.
 
@@ -140,7 +223,7 @@ Edit:
 
 Those are the embedded frontend assets for the starter app right now.
 
-## 7. Where the examples differ
+## 8. Where the examples differ
 
 ### `starter/`
 
@@ -161,7 +244,7 @@ Use this when you want to see a more complete local-first app flow:
 - persistence through the SDK
 - deep links still resolve through the embedded entry document on unknown `GET` and `HEAD` routes
 
-## 8. SDK ergonomics and expectations
+## 9. SDK ergonomics and expectations
 
 The SDK is browser-first.
 
@@ -200,7 +283,7 @@ Practical pattern:
 2. inspect `capabilities`
 3. adapt the UI before calling capability-specific methods
 
-## 9. When to regenerate the SDK
+## 10. When to regenerate the SDK
 
 If you edit `luminka/sdk/luminka.ts`, run:
 
@@ -216,7 +299,7 @@ That updates the generated `luminka.js` copies embedded by:
 
 If you forget this step, the runtime may embed stale frontend SDK code.
 
-## 10. Webview troubleshooting first principles
+## 11. Webview troubleshooting first principles
 
 Webview is the most likely onboarding pain point.
 
@@ -229,19 +312,28 @@ If `go build ./starter` works but `go build -tags webview ./starter` does not, t
 
 Do not debug all of Luminka first. Prove the browser build, then isolate the webview-specific problem.
 
-## 11. Suggested first-hour flow for a new developer
+## 12. Suggested first-hour flow for a new developer
 
 1. `npm install`
-2. `npm run build:sdk`
-3. `npm run build:icons` if you want the starter icon outputs and Windows resource files
-4. `go build ./starter`
-5. run the starter app
-6. edit `starter/main.go` to rename the app
-7. edit `starter/dist/app.js` or `starter/dist/index.html`
-8. rebuild and rerun
-9. only then try `-tags webview`
+2. `npm run build:starter`
+3. run the starter app
+4. edit `starter/main.go` to rename the app
+5. edit `starter/dist/app.js` or `starter/dist/index.html`
+6. rebuild and rerun
+7. only then try `npm run build:starter:webview`
 
-## 12. Canon docs if you need deeper truth
+If you prefer the longer explicit path instead of the recipe script:
+
+1. `npm run build:sdk`
+2. `npm run build:icons` if you want the starter icon outputs and Windows resource files
+3. `starter\build.bat`
+4. run the starter app
+5. edit `starter/main.go` to rename the app
+6. edit `starter/dist/app.js` or `starter/dist/index.html`
+7. rebuild and rerun
+8. only then try `npm run build:starter:webview`
+
+## 13. Canon docs if you need deeper truth
 
 - `docs/product.md` — what Luminka is for
 - `docs/spec.md` — exact behavior contract

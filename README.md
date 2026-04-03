@@ -162,7 +162,7 @@ This transpiles `luminka/sdk/luminka.ts` and writes generated `luminka.js` copie
 ### 3) Build the starter app
 
 ```bash
-go build ./starter
+starter\build.bat
 ```
 
 ### 4) Run it
@@ -194,7 +194,9 @@ go build ./starter
 go build -tags webview ./starter
 ```
 
-The Windows helper scripts reflect that split:
+On Windows, plain `go build ./starter` is still the generic Go build path, but it produces a console build unless you add `-ldflags "-H windowsgui"` or use the helper script.
+
+The Windows helper scripts reflect that split and are the canonical starter entrypoints because they regenerate the SDK, build icons, generate resources, and include the GUI subsystem flag:
 
 - `build.bat` -> browser build
 - `build_webview.bat` -> webview build

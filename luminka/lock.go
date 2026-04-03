@@ -9,10 +9,12 @@ package luminka
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func resolveRootDirectory(root string, policy RootPolicy) (string, error) {
@@ -98,7 +100,13 @@ func acquireInstanceLock(root, name string) (*lockState, error) {
 
 		if processAlive(record.pid) {
 			if record.port > 0 {
-				return &lockState{path: path, pid: record.pid, port: record.port, reused: true}, nil
+				if localhostPortReachable(record.port, 250*time.Millisecond) {
+					return &lockState{path: path, pid: record.pid, port: record.port, reused: true}, nil
+				}
+				if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
+					return nil, removeErr
+				}
+				continue
 			}
 			if record.port == 0 {
 				return &lockState{path: path, pid: record.pid, port: 0, reused: true}, nil
@@ -109,6 +117,15 @@ func acquireInstanceLock(root, name string) (*lockState, error) {
 			return nil, removeErr
 		}
 	}
+}
+
+func localhostPortReachable(port int, timeout time.Duration) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), timeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 type lockRecord struct {

@@ -8,6 +8,7 @@ package luminka
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -236,6 +237,97 @@ func TestAcquireInstanceLockRecoversStalePIDZeroRecord(t *testing.T) {
 	}
 	if state.pid != os.Getpid() {
 		t.Fatalf("pid = %d, want %d", state.pid, os.Getpid())
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	want := fmt.Sprintf("%d:0", os.Getpid())
+	if string(data) != want {
+		t.Fatalf("lock contents = %q, want %q", string(data), want)
+	}
+}
+
+func TestAcquireInstanceLockReusesLiveReachablePortRecord(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	acceptDone := make(chan struct{})
+	go func() {
+		defer close(acceptDone)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = listener.Close()
+		<-acceptDone
+	})
+
+	root := t.TempDir()
+	path := lockFilePath(root, "runtime-lock-live-port")
+	port := listener.Addr().(*net.TCPAddr).Port
+	if !localhostPortReachable(port, 250*time.Millisecond) {
+		t.Skipf("localhost loopback is unavailable in this environment; localhostPortReachable(%d) returned false", port)
+	}
+	if err := os.WriteFile(path, []byte(fmt.Sprintf("%d:%d", os.Getpid(), port)), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	state, err := acquireInstanceLock(root, "runtime-lock-live-port")
+	if err != nil {
+		t.Fatalf("acquireInstanceLock() error = %v", err)
+	}
+
+	if state == nil || !state.reused || state.owned {
+		t.Fatalf("lock state = %#v, want reused reachable-port lock", state)
+	}
+	if state.pid != os.Getpid() {
+		t.Fatalf("pid = %d, want %d", state.pid, os.Getpid())
+	}
+	if state.port != port {
+		t.Fatalf("port = %d, want %d", state.port, port)
+	}
+}
+
+func TestAcquireInstanceLockRecoversStaleClosedPortRecord(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	root := t.TempDir()
+	path := lockFilePath(root, "runtime-lock-closed-port")
+	if err := os.WriteFile(path, []byte(fmt.Sprintf("%d:%d", os.Getpid(), port)), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	state, err := acquireInstanceLock(root, "runtime-lock-closed-port")
+	if err != nil {
+		t.Fatalf("acquireInstanceLock() error = %v", err)
+	}
+	t.Cleanup(func() { _ = removeLockFile(state.path) })
+
+	if !state.owned || state.reused {
+		t.Fatalf("lock state = %#v, want fresh owned lock after closed-port recovery", state)
+	}
+	if state.pid != os.Getpid() {
+		t.Fatalf("pid = %d, want %d", state.pid, os.Getpid())
+	}
+	if state.port != 0 {
+		t.Fatalf("port = %d, want 0", state.port)
 	}
 
 	data, err := os.ReadFile(path)
