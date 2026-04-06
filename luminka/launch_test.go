@@ -22,6 +22,8 @@ func TestParseLaunchOptions(t *testing.T) {
 		{name: "detached", args: []string{"--detached"}, want: launchOptions{RootPolicy: RootPolicyDetached}},
 		{name: "portable", args: []string{"--portable"}, want: launchOptions{RootPolicy: RootPolicyPortable}},
 		{name: "headless", args: []string{"--headless"}, want: launchOptions{Headless: true}},
+		{name: "version", args: []string{"--version"}, want: launchOptions{Version: true}},
+		{name: "version command", args: []string{"version"}, want: launchOptions{Version: true}},
 		{name: "root policy detached", args: []string{"--root-policy", "detached"}, want: launchOptions{RootPolicy: RootPolicyDetached}},
 		{name: "root path", args: []string{"--root", "notes"}, want: launchOptions{Root: "notes"}},
 		{name: "conflicting flags", args: []string{"--portable", "--detached"}, wantErr: "conflicting root policy overrides"},

@@ -19,30 +19,33 @@ import (
 )
 
 type wsMessage struct {
-	Event        string          `json:"event"`
-	ID           json.RawMessage `json:"id,omitempty"`
-	Ok           *bool           `json:"ok,omitempty"`
-	Error        string          `json:"error,omitempty"`
-	Path         string          `json:"path,omitempty"`
-	Data         string          `json:"data,omitempty"`
-	Files        []string        `json:"files,omitempty"`
-	Exists       *bool           `json:"exists,omitempty"`
-	Runner       string          `json:"runner,omitempty"`
-	File         string          `json:"file,omitempty"`
-	Cmd          string          `json:"cmd,omitempty"`
-	Args         []string        `json:"args,omitempty"`
-	Timeout      int             `json:"timeout,omitempty"`
-	Stdout       string          `json:"stdout,omitempty"`
-	Stderr       string          `json:"stderr,omitempty"`
-	Code         *int            `json:"code,omitempty"`
-	Name         string          `json:"name,omitempty"`
-	Mode         Mode            `json:"mode,omitempty"`
-	Root         string          `json:"root,omitempty"`
-	StreamID     string          `json:"stream_id,omitempty"`
-	Seq          uint64          `json:"seq,omitempty"`
-	Lane         string          `json:"lane,omitempty"`
-	EOF          bool            `json:"eof,omitempty"`
-	Capabilities capabilityState `json:"capabilities,omitempty"`
+	Event           string          `json:"event"`
+	ID              json.RawMessage `json:"id,omitempty"`
+	Ok              *bool           `json:"ok,omitempty"`
+	Error           string          `json:"error,omitempty"`
+	Path            string          `json:"path,omitempty"`
+	Data            string          `json:"data,omitempty"`
+	Files           []string        `json:"files,omitempty"`
+	Exists          *bool           `json:"exists,omitempty"`
+	Runner          string          `json:"runner,omitempty"`
+	File            string          `json:"file,omitempty"`
+	Cmd             string          `json:"cmd,omitempty"`
+	Args            []string        `json:"args,omitempty"`
+	Timeout         int             `json:"timeout,omitempty"`
+	Stdout          string          `json:"stdout,omitempty"`
+	Stderr          string          `json:"stderr,omitempty"`
+	Code            *int            `json:"code,omitempty"`
+	Name            string          `json:"name,omitempty"`
+	AppVersion      string          `json:"app_version,omitempty"`
+	RuntimeVersion  string          `json:"runtime_version,omitempty"`
+	ProtocolVersion string          `json:"protocol_version,omitempty"`
+	Mode            Mode            `json:"mode,omitempty"`
+	Root            string          `json:"root,omitempty"`
+	StreamID        string          `json:"stream_id,omitempty"`
+	Seq             uint64          `json:"seq,omitempty"`
+	Lane            string          `json:"lane,omitempty"`
+	EOF             bool            `json:"eof,omitempty"`
+	Capabilities    capabilityState `json:"capabilities,omitempty"`
 }
 
 type websocketConn interface {
@@ -58,55 +61,61 @@ type wsConnection struct {
 
 func (m wsMessage) MarshalJSON() ([]byte, error) {
 	type wire struct {
-		Event        string           `json:"event"`
-		ID           json.RawMessage  `json:"id,omitempty"`
-		Ok           *bool            `json:"ok,omitempty"`
-		Error        string           `json:"error,omitempty"`
-		Path         string           `json:"path,omitempty"`
-		Data         string           `json:"data,omitempty"`
-		Files        []string         `json:"files,omitempty"`
-		Exists       *bool            `json:"exists,omitempty"`
-		Runner       string           `json:"runner,omitempty"`
-		File         string           `json:"file,omitempty"`
-		Cmd          string           `json:"cmd,omitempty"`
-		Args         []string         `json:"args,omitempty"`
-		Timeout      int              `json:"timeout,omitempty"`
-		Stdout       string           `json:"stdout,omitempty"`
-		Stderr       string           `json:"stderr,omitempty"`
-		Code         *int             `json:"code,omitempty"`
-		Name         string           `json:"name,omitempty"`
-		Mode         Mode             `json:"mode,omitempty"`
-		Root         string           `json:"root,omitempty"`
-		StreamID     string           `json:"stream_id,omitempty"`
-		Seq          uint64           `json:"seq,omitempty"`
-		Lane         string           `json:"lane,omitempty"`
-		EOF          bool             `json:"eof,omitempty"`
-		Capabilities *capabilityState `json:"capabilities,omitempty"`
+		Event           string           `json:"event"`
+		ID              json.RawMessage  `json:"id,omitempty"`
+		Ok              *bool            `json:"ok,omitempty"`
+		Error           string           `json:"error,omitempty"`
+		Path            string           `json:"path,omitempty"`
+		Data            string           `json:"data,omitempty"`
+		Files           []string         `json:"files,omitempty"`
+		Exists          *bool            `json:"exists,omitempty"`
+		Runner          string           `json:"runner,omitempty"`
+		File            string           `json:"file,omitempty"`
+		Cmd             string           `json:"cmd,omitempty"`
+		Args            []string         `json:"args,omitempty"`
+		Timeout         int              `json:"timeout,omitempty"`
+		Stdout          string           `json:"stdout,omitempty"`
+		Stderr          string           `json:"stderr,omitempty"`
+		Code            *int             `json:"code,omitempty"`
+		Name            string           `json:"name,omitempty"`
+		AppVersion      string           `json:"app_version,omitempty"`
+		RuntimeVersion  string           `json:"runtime_version,omitempty"`
+		ProtocolVersion string           `json:"protocol_version,omitempty"`
+		Mode            Mode             `json:"mode,omitempty"`
+		Root            string           `json:"root,omitempty"`
+		StreamID        string           `json:"stream_id,omitempty"`
+		Seq             uint64           `json:"seq,omitempty"`
+		Lane            string           `json:"lane,omitempty"`
+		EOF             bool             `json:"eof,omitempty"`
+		Capabilities    *capabilityState `json:"capabilities,omitempty"`
 	}
 	out := wire{
-		Event:    m.Event,
-		ID:       m.ID,
-		Ok:       m.Ok,
-		Error:    m.Error,
-		Path:     m.Path,
-		Data:     m.Data,
-		Files:    m.Files,
-		Exists:   m.Exists,
-		Runner:   m.Runner,
-		File:     m.File,
-		Cmd:      m.Cmd,
-		Args:     m.Args,
-		Timeout:  m.Timeout,
-		Stdout:   m.Stdout,
-		Stderr:   m.Stderr,
-		Code:     m.Code,
-		Name:     m.Name,
-		Mode:     m.Mode,
-		Root:     m.Root,
-		StreamID: m.StreamID,
-		Seq:      m.Seq,
-		Lane:     m.Lane,
-		EOF:      m.EOF,
+		Event:           m.Event,
+		ID:              m.ID,
+		Ok:              m.Ok,
+		Error:           m.Error,
+		Path:            m.Path,
+		Data:            m.Data,
+		Files:           m.Files,
+		Exists:          m.Exists,
+		Runner:          m.Runner,
+		File:            m.File,
+		Cmd:             m.Cmd,
+		Args:            m.Args,
+		Timeout:         m.Timeout,
+		Stdout:          m.Stdout,
+		Stderr:          m.Stderr,
+		Code:            m.Code,
+		Name:            m.Name,
+		AppVersion:      m.AppVersion,
+		RuntimeVersion:  m.RuntimeVersion,
+		ProtocolVersion: m.ProtocolVersion,
+		Mode:            m.Mode,
+		Root:            m.Root,
+		StreamID:        m.StreamID,
+		Seq:             m.Seq,
+		Lane:            m.Lane,
+		EOF:             m.EOF,
 	}
 	if m.Event == "app_info" || m.Capabilities != (capabilityState{}) {
 		caps := m.Capabilities
@@ -160,13 +169,16 @@ func (rt *Runtime) handleWebSocketSession(wsConn *wsConnection) {
 		switch request.Event {
 		case "app_info":
 			_ = writeWSMessage(wsConn, wsMessage{
-				Event:        "app_info",
-				ID:           request.ID,
-				Ok:           boolPtr(true),
-				Name:         rt.Name,
-				Mode:         rt.Mode,
-				Root:         rt.Root,
-				Capabilities: rt.Capabilities,
+				Event:           "app_info",
+				ID:              request.ID,
+				Ok:              boolPtr(true),
+				Name:            rt.Name,
+				AppVersion:      rt.AppVersion,
+				RuntimeVersion:  RuntimeVersion,
+				ProtocolVersion: ProtocolVersion,
+				Mode:            rt.Mode,
+				Root:            rt.Root,
+				Capabilities:    rt.Capabilities,
 			})
 		case "fs_read_text", "fs_write_text", "fs_list", "fs_delete", "fs_exists", "fs_watch", "fs_unwatch", "fs_open_read", "fs_open_write", "stream_chunk", "stream_close":
 			_ = rt.handleFilesystemRequest(wsConn, request, payload)

@@ -19,6 +19,7 @@ var distAssets embed.FS
 func main() {
 	if err := luminka.Run(luminka.Config{
 		Name:            "luminka-hello",
+		AppVersion:      luminka.RuntimeVersion,
 		Mode:            appMode(),
 		RootPolicy:      luminka.RootPolicyPortable,
 		WindowTitle:     "luminka-hello",

@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -29,6 +30,7 @@ const (
 
 type Config struct {
 	Name            string
+	AppVersion      string
 	Mode            Mode
 	RootPolicy      RootPolicy
 	Headless        bool
@@ -56,6 +58,7 @@ type capabilityState struct {
 
 type Runtime struct {
 	Name            string
+	AppVersion      string
 	Mode            Mode
 	Root            string
 	RootPolicy      RootPolicy
@@ -112,6 +115,10 @@ func Run(cfg Config) (err error) {
 		return err
 	}
 	cfg = applyLaunchOverrides(normalizeConfig(cfg), launchOpts)
+	if launchOpts.Version {
+		printVersion(os.Stdout, cfg)
+		return nil
+	}
 	if cfg.Assets == nil {
 		return errors.New("assets are required")
 	}
@@ -177,6 +184,9 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.Name == "" {
 		cfg.Name = defaultAppName
 	}
+	if cfg.AppVersion == "" {
+		cfg.AppVersion = defaultAppVersion
+	}
 	if cfg.Mode == "" {
 		cfg.Mode = ModeBrowser
 	}
@@ -217,6 +227,7 @@ func prepareRuntime(cfg Config) (*Runtime, *lockState, error) {
 
 	rt := &Runtime{
 		Name:            cfg.Name,
+		AppVersion:      cfg.AppVersion,
 		Mode:            cfg.Mode,
 		Root:            root,
 		RootPolicy:      cfg.RootPolicy,
@@ -263,6 +274,15 @@ func applyLaunchOverrides(cfg Config, opts launchOptions) Config {
 	}
 	cfg.Headless = cfg.Headless || opts.Headless
 	return cfg
+}
+
+func printVersion(out io.Writer, cfg Config) {
+	if out == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(out, "%s %s\n", cfg.Name, cfg.AppVersion)
+	_, _ = fmt.Fprintf(out, "Luminka runtime %s\n", RuntimeVersion)
+	_, _ = fmt.Fprintf(out, "Protocol %s\n", ProtocolVersion)
 }
 
 type runtimeLaunchMode string

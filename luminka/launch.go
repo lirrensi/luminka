@@ -21,6 +21,7 @@ type launchOptions struct {
 	Root       string
 	RootPolicy RootPolicy
 	Headless   bool
+	Version    bool
 }
 
 func parseLaunchOptions(args []string) (launchOptions, error) {
@@ -57,6 +58,8 @@ func parseLaunchOptions(args []string) (launchOptions, error) {
 			}
 		case "--headless":
 			opts.Headless = true
+		case "--version", "-version", "version":
+			opts.Version = true
 		}
 	}
 	return opts, nil
@@ -74,7 +77,7 @@ func launchFlagValue(args []string, index int, flag string) (string, int, error)
 
 func isLaunchFlag(arg string) bool {
 	switch arg {
-	case "--root", "--root-policy", "--portable", "--detached", "--headless":
+	case "--root", "--root-policy", "--portable", "--detached", "--headless", "--version", "-version", "version":
 		return true
 	default:
 		return false

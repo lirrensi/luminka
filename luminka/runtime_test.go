@@ -22,6 +22,9 @@ func TestNormalizeConfigDefaultsWindowAndTimeouts(t *testing.T) {
 	if got.Mode != ModeBrowser {
 		t.Fatalf("Mode = %s, want %s", got.Mode, ModeBrowser)
 	}
+	if got.AppVersion != defaultAppVersion {
+		t.Fatalf("AppVersion = %q, want %q", got.AppVersion, defaultAppVersion)
+	}
 	if got.WindowTitle != "demo" {
 		t.Fatalf("WindowTitle = %q, want demo", got.WindowTitle)
 	}
@@ -69,6 +72,9 @@ func TestPrepareRuntimeResolvesCapabilitiesAndWindowFields(t *testing.T) {
 
 	if rt.Mode != ModeWebview {
 		t.Fatalf("Mode = %s, want %s", rt.Mode, ModeWebview)
+	}
+	if rt.AppVersion != defaultAppVersion {
+		t.Fatalf("AppVersion = %q, want %q", rt.AppVersion, defaultAppVersion)
 	}
 	if rt.WindowTitle != "custom-title" || rt.WindowWidth != 1440 || rt.WindowHeight != 900 {
 		t.Fatalf("window config copied incorrectly: title=%q width=%d height=%d", rt.WindowTitle, rt.WindowWidth, rt.WindowHeight)

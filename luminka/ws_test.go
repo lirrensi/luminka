@@ -34,6 +34,15 @@ func TestWebSocketAppInfoAndFilesystemFlow(t *testing.T) {
 	if got := appInfo["mode"]; got != string(ModeBrowser) {
 		t.Fatalf("app_info mode = %v, want %s", got, ModeBrowser)
 	}
+	if got := appInfo["app_version"]; got != defaultAppVersion {
+		t.Fatalf("app_info app_version = %v, want %s", got, defaultAppVersion)
+	}
+	if got := appInfo["runtime_version"]; got != RuntimeVersion {
+		t.Fatalf("app_info runtime_version = %v, want %s", got, RuntimeVersion)
+	}
+	if got := appInfo["protocol_version"]; got != ProtocolVersion {
+		t.Fatalf("app_info protocol_version = %v, want %s", got, ProtocolVersion)
+	}
 	capabilities, ok := appInfo["capabilities"].(map[string]any)
 	if !ok || !truthyMapValue(capabilities, "fs") {
 		t.Fatalf("app_info capabilities = %#v, want fs enabled", appInfo["capabilities"])
@@ -272,6 +281,7 @@ func newTestWebSocketRuntime(t *testing.T, root string, caps capabilityState) (*
 	t.Helper()
 	rt := &Runtime{
 		Name:         "test-app",
+		AppVersion:   defaultAppVersion,
 		Mode:         ModeBrowser,
 		Root:         root,
 		Capabilities: caps,

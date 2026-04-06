@@ -17,6 +17,9 @@ export interface LuminkaCapabilities {
 
 export interface LuminkaAppInfo {
   name: string;
+  app_version: string;
+  runtime_version: string;
+  protocol_version: string;
   mode: string;
   root: string;
   capabilities: LuminkaCapabilities;
@@ -44,6 +47,9 @@ export interface LuminkaFrame {
   stderr?: string;
   code?: number | null;
   name?: string;
+  app_version?: string;
+  runtime_version?: string;
+  protocol_version?: string;
   mode?: string;
   root?: string;
   capabilities?: LuminkaCapabilities;
@@ -692,14 +698,20 @@ export class LuminkaClient {
   private requireAppInfo(response: LuminkaFrame): LuminkaAppInfo {
     const missing: string[] = [];
     if (!response.name) missing.push("name");
+    if (!response.app_version) missing.push("app_version");
+    if (!response.runtime_version) missing.push("runtime_version");
+    if (!response.protocol_version) missing.push("protocol_version");
     if (!response.mode) missing.push("mode");
     if (!response.root) missing.push("root");
     if (!response.capabilities) missing.push("capabilities");
     if (missing.length > 0) {
-      throw new Error(`Luminka app_info response was incomplete: missing ${missing.join(", ")}. Check that the host returns name, mode, root, and capabilities.`);
+      throw new Error(`Luminka app_info response was incomplete: missing ${missing.join(", ")}. Check that the host returns name, app_version, runtime_version, protocol_version, mode, root, and capabilities.`);
     }
     return {
       name: response.name!,
+      app_version: response.app_version!,
+      runtime_version: response.runtime_version!,
+      protocol_version: response.protocol_version!,
       mode: response.mode!,
       root: response.root!,
       capabilities: response.capabilities!,

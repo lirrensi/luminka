@@ -106,6 +106,9 @@ test("LuminkaClient appInfo sends a binary request and parses response", async (
     id: request.header.id,
     ok: true,
     name: "starter",
+    app_version: "1.2.3",
+    runtime_version: "2.0.0",
+    protocol_version: "2",
     mode: "webview",
     root: "C:/apps/starter",
     capabilities: { fs: true, scripts: false, shell: false },
@@ -114,6 +117,9 @@ test("LuminkaClient appInfo sends a binary request and parses response", async (
   const info = await connectPromise;
   assert.deepEqual(info, {
     name: "starter",
+    app_version: "1.2.3",
+    runtime_version: "2.0.0",
+    protocol_version: "2",
     mode: "webview",
     root: "C:/apps/starter",
     capabilities: { fs: true, scripts: false, shell: false },
