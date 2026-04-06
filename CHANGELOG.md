@@ -1,16 +1,28 @@
 # Changelog
 
-## v2 — protocol update
+All notable changes to Luminka are documented here.
 
-This is a standalone update with a breaking transport change.
+## [2.0.0] - 2026-04-06
+
+Version 2 is a breaking protocol release.
+
+### Changed
+
+- Replaced the old text-only WebSocket transport with a binary-only frame format: `[header length][JSON header][payload bytes]`.
+- Moved file and stream payload transfer to raw bytes so filesystem and streaming operations stay byte-accurate.
+- Brought the runtime, in-repo TypeScript SDK, starter app, and examples forward together onto the new transport.
 
 ### Breaking
 
-- The canonical WebSocket transport is now binary: `[header length][JSON header][payload bytes]`.
-- File and stream payloads now move as raw bytes, so changes stay byte-accurate.
-- Apps that depended on older bridge assumptions should be rebuilt or rewritten against the v2 SDK.
+- Apps built against the version 1 text transport are not wire-compatible with version 2.
+- Existing integrations should be rebuilt or rewritten against the current v2 SDK and protocol shape.
 
-### Updated
+## [1.0.0]
 
-- Runtime, SDK, and starter/example apps were brought forward together.
-- Small plumbing changes landed across filesystem, stream, shell, and launch paths.
+Initial public release.
+
+### Added
+
+- Go runtime for hosting desktop-style web apps.
+- Initial SDK and starter flow for app integration.
+- Text-only WebSocket transport layer used by the first protocol generation.

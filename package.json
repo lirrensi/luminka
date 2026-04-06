@@ -2,7 +2,26 @@
     "name": "luminka",
     "private": true,
     "type": "module",
-    "version": "2.0",
+    "version": "2.0.0",
+    "description": "Browser-first Go runtime with an in-repo TypeScript SDK for desktop-style web apps.",
+    "license": "MIT",
+    "author": "lirrensi",
+    "homepage": "https://github.com/lirrensi/luminka",
+    "bugs": {
+        "url": "https://github.com/lirrensi/luminka/issues"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/lirrensi/luminka.git"
+    },
+    "keywords": [
+        "go",
+        "runtime",
+        "sdk",
+        "websocket",
+        "desktop",
+        "webview"
+    ],
     "scripts": {
         "build:sdk": "tsx scripts/build_sdk.ts",
         "build:icons": "tsx scripts/build_icons.ts",

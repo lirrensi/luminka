@@ -9,6 +9,7 @@ import * as path from "node:path";
 import * as ts from "typescript";
 
 const root = process.cwd();
+const packageJsonPath = path.join(root, "package.json");
 const sourcePath = path.join(root, "luminka", "sdk", "luminka.ts");
 const outputPaths = [
   path.join(root, "sdk", "dist", "luminka.js"),
@@ -16,9 +17,25 @@ const outputPaths = [
   path.join(root, "examples", "hello", "dist", "luminka.js"),
   path.join(root, "examples", "kanban", "dist", "luminka.js"),
 ];
+const sdkDistPackageJsonPath = path.join(root, "sdk", "dist", "package.json");
+
+type PackageJson = {
+  name: string;
+  version: string;
+  description?: string;
+  license?: string;
+  homepage?: string;
+  bugs?: { url?: string };
+  repository?: { type?: string; url?: string };
+  keywords?: string[];
+};
 
 async function main(): Promise<void> {
-  const source = await readFile(sourcePath, "utf8");
+  const [source, packageJsonText] = await Promise.all([
+    readFile(sourcePath, "utf8"),
+    readFile(packageJsonPath, "utf8"),
+  ]);
+  const packageJson = JSON.parse(packageJsonText) as PackageJson;
   const result = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.ES2020,
@@ -28,11 +45,33 @@ async function main(): Promise<void> {
     },
     fileName: sourcePath,
   });
+  const banner = `// ${packageJson.name} SDK v${packageJson.version}\n`;
+  const outputText = `${banner}${result.outputText}`;
 
   for (const outputPath of outputPaths) {
     await mkdir(path.dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, result.outputText, "utf8");
+    await writeFile(outputPath, outputText, "utf8");
   }
+
+  const sdkPackageJson = {
+    name: `${packageJson.name}-sdk`,
+    private: true,
+    type: "module",
+    version: packageJson.version,
+    description: packageJson.description,
+    license: packageJson.license,
+    homepage: packageJson.homepage,
+    bugs: packageJson.bugs,
+    repository: packageJson.repository,
+    keywords: packageJson.keywords,
+    exports: {
+      ".": "./luminka.js",
+      "./luminka.js": "./luminka.js",
+    },
+  };
+
+  await mkdir(path.dirname(sdkDistPackageJsonPath), { recursive: true });
+  await writeFile(sdkDistPackageJsonPath, `${JSON.stringify(sdkPackageJson, null, 2)}\n`, "utf8");
 }
 
 main().catch((error) => {
