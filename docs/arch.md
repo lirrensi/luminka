@@ -10,7 +10,7 @@ The current architecture target is no longer a text-only request/response bridge
 
 ## Scope Boundary
 
-**Owns**: embedded asset serving, localhost runtime, binary WebSocket framing, stream session management, capability gating, filesystem bridge, script bridge, shell bridge, single-instance handling, root policy resolution, browser/webview shell launching, headless launch behavior, starter scaffold, example apps, TS SDK, packaging hooks for app icons
+**Owns**: embedded asset serving, localhost runtime, binary WebSocket framing, stream session management, capability gating, filesystem bridge, script bridge, shell bridge, single-instance handling, root policy resolution, browser/webview shell launching, headless launch behavior, starter scaffold, example apps, TS SDK including tracked text file helpers, packaging hooks for app icons
 
 **Does not own**: frontend build pipelines, application-specific data schemas, remote networking, auth, cloud sync, npm distribution, PTY emulation
 
@@ -236,6 +236,7 @@ Responsibilities:
 - encode and decode the binary frame envelope,
 - provide promise-style control requests,
 - expose Node-inspired text, binary, and stream helpers,
+- expose tracked text file helpers for two-way file-backed state,
 - wrap filesystem, script, shell, and app-info calls,
 - hide request IDs and stream/session mechanics from normal app code,
 - stay thin enough that direct protocol access remains possible.
@@ -243,6 +244,11 @@ Responsibilities:
 The SDK is in-repo and first-class, but not a standalone npm product.
 
 The TypeScript file remains the source of truth. The repository also owns a generated JavaScript distribution surface under `sdk/dist/` for consumers who want a ready-to-embed browser artifact without importing the TypeScript source directly.
+
+The SDK preserves two filesystem layers:
+
+- raw helpers such as `watch`, `unwatch`, and `onFileChanged`, which forward runtime watch behavior without origin filtering,
+- friendly tracked text file helpers, which maintain per-file known text, debounce raw change notifications, re-read after changes, suppress echoes from SDK-originated saves, and notify subscribers only for meaningful external content changes.
 
 Both consumption lanes are first-class:
 
@@ -343,6 +349,23 @@ frontend registers watch
   -> dispatcher pushes fs_changed
   -> frontend decides whether to re-read
 ```
+
+Raw watch events are origin-unaware and may include writes initiated by the same SDK client.
+
+### Tracked Text File Flow
+
+```text
+frontend creates tracked text file helper
+  -> helper registers a raw runtime watch for the path
+  -> helper load reads text and records current known text
+  -> helper save writes text and records SDK-originated known text
+  -> runtime may later emit raw fs_changed for that same write
+  -> helper debounces and re-reads the file
+  -> helper suppresses the event if text matches known SDK state
+  -> helper notifies subscribers if text differs from known SDK state
+```
+
+This flow is the recommended path for local-first apps that bind UI state to a text file. Raw watch APIs remain available for callers that need every filesystem event.
 
 ### Streaming Process Flow
 

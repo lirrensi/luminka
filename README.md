@@ -34,7 +34,7 @@ The flow is simple:
 4. Compile the Go app.
 5. Run the resulting `.exe` anywhere you want.
 
-If you import Luminka directly, rebuild the SDK outputs with `npm run build:sdk` so the TypeScript source, generated browser artifact, and embedded copies stay in sync.
+If you import Luminka directly, rebuild the SDK outputs with `pnpm build:sdk` so the TypeScript source, generated browser artifact, and embedded copies stay in sync.
 
 If you want runtime access to the filesystem, bundled scripts, or shell commands, use the Luminka SDK to talk to the host and enable the capabilities you need.
 
@@ -115,7 +115,7 @@ In that flow:
 
 The public Go module path is `github.com/lirrensi/luminka`. The runtime package stays under `luminka/`, so the direct Go import path is `github.com/lirrensi/luminka/luminka`.
 
-The SDK source of truth is [`luminka/sdk/luminka.ts`](luminka/sdk/luminka.ts), and `npm run build:sdk` regenerates both the stable external artifact at `sdk/dist/luminka.js` and the embedded browser-ready copies.
+The SDK source of truth is [`luminka/sdk/luminka.ts`](luminka/sdk/luminka.ts), and `pnpm build:sdk` regenerates both the stable external artifact at `sdk/dist/luminka.js` and the embedded browser-ready copies.
 
 ## Which app should I open?
 
@@ -130,8 +130,8 @@ The SDK source of truth is [`luminka/sdk/luminka.ts`](luminka/sdk/luminka.ts), a
 ### Required
 
 - **Go 1.22+**
-- **Node.js + npm**
-- `npm install` in the repo root to install local dev dependencies like **`tsx`** and **TypeScript**
+- **Node.js + pnpm**
+- `pnpm install` in the repo root to install local dev dependencies like **`tsx`** and **TypeScript**
 
 ### Required for webview builds
 
@@ -147,13 +147,13 @@ If you want the lowest-friction first run, start with a **browser build**.
 ### 1) Install JS tooling
 
 ```bash
-npm install
+pnpm install
 ```
 
 ### 2) Rebuild the in-repo SDK outputs
 
 ```bash
-npm run build:sdk
+pnpm build:sdk
 ```
 
 This transpiles `luminka/sdk/luminka.ts` and writes generated `luminka.js` outputs into:
@@ -271,7 +271,7 @@ If you are turning `starter/` into your app, these are the first places to edit:
 | Frontend styles | `starter/dist/style.css` |
 | SDK source of truth | `luminka/sdk/luminka.ts` |
 | Generated SDK artifact | `sdk/dist/luminka.js` |
-| Regenerate embedded SDK copies | `npm run build:sdk` |
+| Regenerate embedded SDK copies | `pnpm build:sdk` |
 
 ## SDK behavior you should know early
 
@@ -292,9 +292,41 @@ new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" })
 - `appInfo()` reports the resolved runtime capabilities so your frontend can adapt.
 - Text helpers: `readText()` / `writeText()`; aliases: `read()` / `write()`.
 - Byte helpers: `readBytes()` / `writeBytes()`.
+- Friendly file-backed state helper: `trackedTextFile()`.
 - Stream helpers: `createReadStream()` / `createWriteStream()` and `runScriptStream()` / `runShellStream()`.
 
 If you call filesystem, script, or shell APIs when the capability is unavailable, expect an explicit runtime error rather than silent fallback.
+
+### File-backed UI state
+
+For apps whose real core is a local project file — a note, tracker, workspace, playlist, or any little library of user data — prefer the SDK's tracked text file helper over wiring raw filesystem watch events directly into UI state.
+
+```ts
+import { createLuminkaClient } from "./luminka.js";
+
+const client = createLuminkaClient();
+const workspace = client.trackedTextFile("workspace.emptyspace.xml");
+
+const initialText = await workspace.load();
+render(initialText);
+
+workspace.onExternalChange((text) => {
+  render(text);
+});
+
+await workspace.save(serializeCurrentWorkspace());
+```
+
+`trackedTextFile()` keeps the small local-first loop tidy:
+
+- `load()` reads the current text and remembers it as the SDK's known state.
+- `save(text)` writes the file and records that text as app-originated state.
+- raw runtime `fs_changed` events are debounced and re-read.
+- same-content write echoes from your own saves are suppressed.
+- `onExternalChange()` only reports meaningful file content changes from outside the current SDK state.
+- `dispose()` removes the helper-managed watch and listeners.
+
+Raw filesystem APIs are still available when you need lower-level control: `watch()`, `unwatch()`, and `onFileChanged()` forward runtime watch events without origin filtering.
 
 ## Browser vs webview: what should I choose?
 
@@ -324,8 +356,8 @@ If you call filesystem, script, or shell APIs when the capability is unavailable
 ## Common commands
 
 ```bash
-npm install
-npm run build:sdk
+pnpm install
+pnpm build:sdk
 go build ./starter
 go build ./examples/hello
 go build ./examples/kanban
@@ -336,7 +368,7 @@ go build -tags shell ./starter
 
 Windows helpers live in each app folder as `build.bat` and `build_webview.bat`.
 
-Starter Windows builds now run `npm run build:sdk`, `npm run build:icons`, `go-winres make`, and `go build` in that order.
+Starter Windows builds now run the SDK build, icon build, `go-winres make`, and `go build` in that order.
 
 ## Webview friction notes
 

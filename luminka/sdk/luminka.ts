@@ -1,7 +1,7 @@
 // FILE: luminka/sdk/luminka.ts
 // PURPOSE: Provide the browser-first Luminka WebSocket SDK for frontend apps.
 // OWNS: Binary WebSocket framing, request/response helpers, and file/process capability wrappers.
-// EXPORTS: LuminkaCapabilities, LuminkaAppInfo, LuminkaOptions, LuminkaFrame, LuminkaClient, createLuminkaClient, encodeLuminkaFrame, decodeLuminkaFrame
+// EXPORTS: LuminkaCapabilities, LuminkaAppInfo, LuminkaOptions, LuminkaFrame, TrackedTextFileOptions, TrackedTextFile, LuminkaClient, createLuminkaClient, encodeLuminkaFrame, decodeLuminkaFrame
 // DOCS: docs/spec.md, docs/arch.md, agent_chat/plan_luminka_stream_runtime_2026-04-01.md
 
 const DEFAULT_WS_PATH = "/ws";
@@ -63,6 +63,20 @@ export interface ExecStreamResult {
   stdout: ReadableStream<Uint8Array>;
   stderr: ReadableStream<Uint8Array>;
   completed: Promise<{ code: number | null; stdout: string; stderr: string }>;
+}
+
+export interface TrackedTextFileOptions {
+  debounceMs?: number;
+}
+
+export interface TrackedTextFile {
+  readonly path: string;
+  load(): Promise<string>;
+  save(text: string): Promise<void>;
+  getText(): string | null;
+  onExternalChange(listener: (text: string) => void | Promise<void>): () => void;
+  onRawChange(listener: (path: string) => void): () => void;
+  dispose(): Promise<void>;
 }
 
 type RequestRecord = {
@@ -303,6 +317,10 @@ export class LuminkaClient {
 
   async unwatch(path: string): Promise<void> {
     await this.request({ event: "fs_unwatch", path });
+  }
+
+  trackedTextFile(path: string, options: TrackedTextFileOptions = {}): TrackedTextFile {
+    return new LuminkaTrackedTextFile(this, path, options);
   }
 
   async runScript(runner: string, file: string, args: string[] = [], timeout?: number): Promise<{ stdout: string; stderr: string; code: number | null }> {
@@ -781,6 +799,149 @@ export class LuminkaClient {
   }
 }
 
+class LuminkaTrackedTextFile implements TrackedTextFile {
+  readonly path: string;
+  private readonly client: LuminkaClient;
+  private readonly debounceMs: number;
+  private readonly externalListeners = new Set<(text: string) => void | Promise<void>>();
+  private readonly rawListeners = new Set<(path: string) => void>();
+  private currentText: string | null = null;
+  private disposed = false;
+  private watchStarted = false;
+  private watchPromise: Promise<void> | null = null;
+  private unsubscribeRaw: (() => void) | null = null;
+  private debounceTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+  private pendingReload: Promise<void> | null = null;
+
+  constructor(client: LuminkaClient, path: string, options: TrackedTextFileOptions) {
+    this.client = client;
+    this.path = path;
+    this.debounceMs = isNonNegativeNumber(options.debounceMs) ? options.debounceMs : 100;
+  }
+
+  async load(): Promise<string> {
+    await this.ensureWatch();
+    const text = await this.client.readText(this.path);
+    this.currentText = text;
+    return text;
+  }
+
+  async save(text: string): Promise<void> {
+    this.assertActive();
+    await this.ensureWatch();
+    await this.client.writeText(this.path, text);
+    this.currentText = text;
+  }
+
+  getText(): string | null {
+    return this.currentText;
+  }
+
+  onExternalChange(listener: (text: string) => void | Promise<void>): () => void {
+    this.assertActive();
+    this.externalListeners.add(listener);
+    void this.ensureWatch();
+    return () => this.externalListeners.delete(listener);
+  }
+
+  onRawChange(listener: (path: string) => void): () => void {
+    this.assertActive();
+    this.rawListeners.add(listener);
+    void this.ensureWatch();
+    return () => this.rawListeners.delete(listener);
+  }
+
+  async dispose(): Promise<void> {
+    this.disposed = true;
+    this.clearDebounceTimer();
+    if (this.unsubscribeRaw) {
+      this.unsubscribeRaw();
+      this.unsubscribeRaw = null;
+    }
+    this.externalListeners.clear();
+    this.rawListeners.clear();
+    if (this.watchStarted) {
+      await this.client.unwatch(this.path);
+      this.watchStarted = false;
+    }
+  }
+
+  private assertActive(): void {
+    if (this.disposed) {
+      throw new Error(`tracked text file ${this.path} has been disposed`);
+    }
+  }
+
+  private async ensureWatch(): Promise<void> {
+    this.assertActive();
+    if (this.watchStarted) {
+      return;
+    }
+    if (this.watchPromise) {
+      return this.watchPromise;
+    }
+    this.unsubscribeRaw = this.client.onFileChanged((path) => {
+      if (path !== this.path) {
+        return;
+      }
+      for (const listener of this.rawListeners) {
+        listener(path);
+      }
+      this.scheduleReload();
+    });
+    this.watchPromise = this.client.watch(this.path)
+      .then(() => {
+        this.watchStarted = true;
+      })
+      .catch((error) => {
+        if (this.unsubscribeRaw) {
+          this.unsubscribeRaw();
+          this.unsubscribeRaw = null;
+        }
+        throw error;
+      })
+      .finally(() => {
+        this.watchPromise = null;
+      });
+    return this.watchPromise;
+  }
+
+  private scheduleReload(): void {
+    this.clearDebounceTimer();
+    this.debounceTimer = globalThis.setTimeout(() => {
+      this.debounceTimer = null;
+      void this.reloadAfterChange();
+    }, this.debounceMs);
+  }
+
+  private reloadAfterChange(): Promise<void> {
+    if (this.pendingReload) {
+      return this.pendingReload;
+    }
+    this.pendingReload = this.client.readText(this.path)
+      .then((text) => {
+        if (text === this.currentText) {
+          return;
+        }
+        this.currentText = text;
+        for (const listener of this.externalListeners) {
+          safeNotifyText(listener, text);
+        }
+      })
+      .finally(() => {
+        this.pendingReload = null;
+      });
+    return this.pendingReload;
+  }
+
+  private clearDebounceTimer(): void {
+    if (this.debounceTimer) {
+      globalThis.clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+  }
+}
+
 export function createLuminkaClient(options?: LuminkaOptions): LuminkaClient {
   return new LuminkaClient(options);
 }
@@ -793,6 +954,14 @@ function createDeferred<T>(): Deferred<T> {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+function isNonNegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && value >= 0;
+}
+
+function safeNotifyText(listener: (text: string) => void | Promise<void>, text: string): void {
+  void Promise.resolve(listener(text));
 }
 
 function collectReadableStream(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {

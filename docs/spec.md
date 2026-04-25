@@ -34,6 +34,7 @@ This specification covers:
 - runtime capability gating,
 - WebSocket transport contracts,
 - chunked byte streams,
+- SDK-level tracked text file behavior,
 - default external data location,
 - lifecycle and shutdown behavior.
 
@@ -375,7 +376,7 @@ If filesystem capability is disabled, any `fs_*` call MUST fail explicitly.
 
 ### 12. Filesystem Change Notifications
 
-If filesystem capability is enabled and a path is being watched, the runtime MUST notify the frontend when an observed external change occurs.
+If filesystem capability is enabled and a path is being watched, the runtime MUST notify the frontend when it observes that the path changed.
 
 Notification header:
 
@@ -385,7 +386,33 @@ Notification header:
 
 The implementation MAY use polling or native OS file watching. The observable contract is the notification, not the detection strategy.
 
-### 13. Script Execution Capability
+The raw filesystem watch contract is origin-unaware. A runtime notification MAY be caused by a write performed through the same frontend client that registered the watch. The runtime MUST NOT be required to distinguish same-client writes from other local modifications.
+
+### 13. SDK Tracked Text File Helper
+
+A conforming product implementation SHOULD provide a higher-level SDK helper for text files that supports the common local-first pattern of loading a file, saving new text to that file, and subscribing to meaningful external content changes.
+
+The helper is layered on top of the filesystem capability. It does not change the raw `fs_watch` or `fs_changed` transport contract.
+
+The helper SHOULD expose operations equivalent to:
+
+| Operation | Behavior |
+|---|---|
+| create tracked text file | Bind helper state to one relative path |
+| load | Read current file text and record it as the helper's current known text |
+| save | Write text to the file and record the written text as SDK-originated state |
+| subscribe | Register a listener for meaningful external text changes |
+| dispose | Remove helper-managed watches and listeners |
+
+For watched paths, the helper SHOULD debounce rapid raw change notifications before re-reading the file.
+
+After a debounced raw change notification, the helper SHOULD re-read the file and compare the current file text to its current known text or equivalent content hash. If the content matches the current known text, the helper SHOULD suppress the notification as a write echo or duplicate event. If the content differs, the helper SHOULD update its current known text and notify subscribers with the new text.
+
+When `save` completes successfully, the helper MUST update its current known text to the saved text. Subsequent raw watch notifications for identical content SHOULD NOT be reported as external changes.
+
+The helper MAY expose raw watch events separately for advanced callers, but raw events MUST remain distinguishable from meaningful external content-change callbacks.
+
+### 14. Script Execution Capability
 
 If script capability is enabled, the runtime MUST support synchronous execution and MAY additionally support stream-mode execution.
 
@@ -458,7 +485,7 @@ If the selected external script is missing from the allowed root, or the selecte
 
 If script capability is disabled, `script_exec` MUST fail explicitly.
 
-### 14. Shell Execution Capability
+### 15. Shell Execution Capability
 
 If shell capability is enabled, the runtime MUST support synchronous execution and MAY additionally support stream-mode execution.
 
@@ -505,7 +532,7 @@ General stdin streaming is not required in v1 of this stream model.
 
 If shell capability is disabled, `shell_exec` MUST fail explicitly.
 
-### 15. Idle and Shutdown Behavior
+### 16. Idle and Shutdown Behavior
 
 Browser builds SHOULD shut down after a configurable idle period once all active frontend connections are gone.
 

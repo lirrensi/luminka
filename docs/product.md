@@ -29,7 +29,7 @@ It is especially aimed at small local-first tools, internal utilities, mini-apps
 
 ## Core Capabilities
 
-Luminka fundamentally provides six things:
+Luminka fundamentally provides seven things:
 
 1. **Static app hosting inside a single binary**  
    A built frontend is embedded into the executable and served from inside it.
@@ -50,6 +50,9 @@ Luminka fundamentally provides six things:
 
 6. **A minimal developer experience layer**  
    Luminka exposes a canonical transport protocol and also ships a small TypeScript SDK with Node-inspired helpers for text, binary files, and runtime streams.
+
+7. **Friendly file-backed state helpers**
+   For local-first apps that keep UI state in project files, the SDK provides higher-level tracked text file helpers that load, save, and subscribe to meaningful external changes while suppressing write echoes caused by the app's own saves.
 
 ## Design Principles
 
@@ -87,6 +90,8 @@ A developer creates or builds a frontend app, places the output into the expecte
 ### 2. Build a portable app with local storage
 
 A developer uses Luminka's default filesystem capability so the frontend can read and write files beside the binary. The app remains self-contained and portable across folders and machines.
+
+For two-way file-backed state, the developer can use the SDK's tracked text file helper instead of wiring raw file-watch events directly into UI state. The helper treats runtime file watching as a raw signal, reloads the file after changes, ignores echoes from SDK-originated saves, and notifies the app only when the file content meaningfully changed outside the current SDK state.
 
 ### 3. Install one binary and run many project folders
 
