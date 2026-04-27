@@ -429,6 +429,7 @@ If you are onboarding a new developer, have them prove the browser build first.
 ## More docs
 
 - [`docs/onboarding.md`](docs/onboarding.md) — practical setup and first edits
+- [`docs/sdk.md`](docs/sdk.md) — TypeScript SDK guide for frontend apps
 - [`docs/product.md`](docs/product.md) — product overview
 - [`docs/spec.md`](docs/spec.md) — behavior and protocol spec
 - [`docs/arch.md`](docs/arch.md) — repository and runtime architecture
