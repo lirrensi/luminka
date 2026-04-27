@@ -6,6 +6,8 @@
 
 Luminka is a tiny Go runtime for turning a built web app into a portable `.exe`.
 
+Current release: **v3.0.0** — adds local broadcast coordination for multi-tab browser apps plus single-instance/webview quality-of-life polish, without changing the normal SDK adoption path.
+
 It gives you a simple way to ship a web app like a desktop app, without Electron, Tauri, or a heavier framework shell.
 
 ## 💡 Why it exists
@@ -38,9 +40,9 @@ If you import Luminka directly, rebuild the SDK outputs with `pnpm build:sdk` so
 
 If you want runtime access to the filesystem, bundled scripts, or shell commands, use the Luminka SDK to talk to the host and enable the capabilities you need.
 
-The current bridge uses a binary WebSocket protocol with a JSON header plus raw payload bytes. That keeps file changes and stream chunks byte-accurate instead of forcing everything through text encoding.
+The current bridge uses a binary WebSocket protocol with a JSON header plus raw payload bytes. That keeps file changes, stream chunks, and broadcast payloads byte-accurate instead of forcing everything through text encoding.
 
-If your app has any direct ties to the earlier protocol shape, treat this as a standalone v2 update: rebuild or rewrite the mini-app against the current SDK rather than trying to carry the old wiring forward.
+Version 3 is mostly additive. If your app already uses the SDK, rebuild against the current SDK and it should continue naturally. The main compatibility risk is for projects that hand-edited Luminka's Go internals, custom lock-file handling, or raw WebSocket protocol code.
 
 That is the point: keep your frontend stack, package it into one portable app, and add local power only when you want it.
 
@@ -88,7 +90,9 @@ It gives you:
 - bundled internal scripts that can live inside the `.exe` itself,
 - a **localhost WebSocket bridge** from frontend to host runtime,
 - two app shells: **browser** and **webview**,
-- explicit capability gates for **filesystem**, **scripts**, and **shell**.
+- explicit capability gates for **filesystem**, **scripts**, and **shell**,
+- transient local **broadcast events** between connected frontend clients,
+- SDK **multi-tab coordination** helpers for browser-mode apps.
 
 ## Start here
 
@@ -293,6 +297,8 @@ new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" })
 - Text helpers: `readText()` / `writeText()`; aliases: `read()` / `write()`.
 - Byte helpers: `readBytes()` / `writeBytes()`.
 - Friendly file-backed state helper: `trackedTextFile()`.
+- Local broadcast helpers: `broadcast()` and `onBroadcast()`.
+- Multi-tab coordination helper: `createMultiTabCoordinator()`.
 - Stream helpers: `createReadStream()` / `createWriteStream()` and `runScriptStream()` / `runShellStream()`.
 
 If you call filesystem, script, or shell APIs when the capability is unavailable, expect an explicit runtime error rather than silent fallback.
@@ -328,6 +334,41 @@ await workspace.save(serializeCurrentWorkspace());
 
 Raw filesystem APIs are still available when you need lower-level control: `watch()`, `unwatch()`, and `onFileChanged()` forward runtime watch events without origin filtering.
 
+### Broadcast and multi-tab coordination
+
+Version 3 adds transient local broadcasts between all connected frontend clients in the same runtime instance. This is especially useful in **browser mode**, where the same Luminka app may be open in multiple tabs.
+
+Use raw broadcast events when you only need lightweight pub/sub:
+
+```ts
+const client = createLuminkaClient();
+await client.connect();
+
+const unsubscribe = client.onBroadcast("workspace", (message) => {
+  console.log("workspace event", message.data);
+});
+
+await client.broadcast("workspace", { type: "refresh" });
+```
+
+Use the multi-tab coordinator when you need tabs to avoid stepping on each other:
+
+```ts
+const coordinator = client.createMultiTabCoordinator("workspace");
+
+coordinator.onPrimaryChanged((peer) => {
+  console.log("primary tab", peer?.sessionId);
+});
+
+await coordinator.start();
+
+if (coordinator.isPrimary()) {
+  // Run the one-tab-only task here.
+}
+```
+
+The coordinator uses Luminka broadcast messages to announce peers, heartbeat presence, elect the oldest live session as primary, and pass small typed messages between tabs. Luminka does not own your app state; it just gives tabs a simple local coordination lane.
+
 ## Browser vs webview: what should I choose?
 
 ### Choose browser mode when
@@ -341,6 +382,8 @@ Raw filesystem APIs are still available when you need lower-level control: `watc
 - you want a single-window desktop app feel,
 - you are ready to deal with native toolchain setup,
 - you understand that build or launch failures may be platform-specific.
+
+On Windows, duplicate launches of a webview build now try to focus the already-running native window for the same app root instead of leaving the user wondering where the app went. On other platforms, this remains best-effort and may no-op until native focus support is added.
 
 ## Repo shape
 
