@@ -170,20 +170,19 @@ func TestAcquireInstanceLockCreatesFreshPIDZeroRecord(t *testing.T) {
 	if !state.owned || state.reused {
 		t.Fatalf("lock state = %#v, want owned fresh lock", state)
 	}
-	if state.pid != os.Getpid() {
-		t.Fatalf("pid = %d, want %d", state.pid, os.Getpid())
+	if state.record.PID != os.Getpid() {
+		t.Fatalf("pid = %d, want %d", state.record.PID, os.Getpid())
 	}
-	if state.port != 0 {
-		t.Fatalf("port = %d, want 0", state.port)
+	if state.record.Port != 0 {
+		t.Fatalf("port = %d, want 0", state.record.Port)
 	}
 
-	data, err := os.ReadFile(state.path)
+	record, err := readLockRecord(state.path)
 	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
+		t.Fatalf("readLockRecord() error = %v", err)
 	}
-	want := fmt.Sprintf("%d:0", os.Getpid())
-	if string(data) != want {
-		t.Fatalf("lock contents = %q, want %q", string(data), want)
+	if record.PID != os.Getpid() || record.Port != 0 {
+		t.Fatalf("lock record = %#v, want current pid and port 0", record)
 	}
 }
 
@@ -203,20 +202,19 @@ func TestAcquireInstanceLockReusesLivePIDZeroRecord(t *testing.T) {
 	if second == nil || !second.reused || second.owned {
 		t.Fatalf("second lock state = %#v, want reused live lock", second)
 	}
-	if second.pid != os.Getpid() {
-		t.Fatalf("pid = %d, want %d", second.pid, os.Getpid())
+	if second.record.PID != os.Getpid() {
+		t.Fatalf("pid = %d, want %d", second.record.PID, os.Getpid())
 	}
-	if second.port != 0 {
-		t.Fatalf("port = %d, want 0", second.port)
+	if second.record.Port != 0 {
+		t.Fatalf("port = %d, want 0", second.record.Port)
 	}
 
-	data, err := os.ReadFile(first.path)
+	record, err := readLockRecord(first.path)
 	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
+		t.Fatalf("readLockRecord() error = %v", err)
 	}
-	want := fmt.Sprintf("%d:0", os.Getpid())
-	if string(data) != want {
-		t.Fatalf("lock contents = %q, want %q", string(data), want)
+	if record.PID != os.Getpid() || record.Port != 0 {
+		t.Fatalf("lock record = %#v, want current pid and port 0", record)
 	}
 }
 
@@ -228,8 +226,8 @@ func TestAcquireInstanceLockRecoversStalePIDZeroRecord(t *testing.T) {
 
 	root := t.TempDir()
 	path := lockFilePath(root, "runtime-lock-stale")
-	if err := os.WriteFile(path, []byte(fmt.Sprintf("%d:0", stalePID)), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
+	if err := writeInstanceRecord(path, instanceRecord{PID: stalePID, Port: 0, Mode: ModeBrowser}); err != nil {
+		t.Fatalf("writeInstanceRecord() error = %v", err)
 	}
 
 	state, err := acquireInstanceLock(root, "runtime-lock-stale")
@@ -241,17 +239,16 @@ func TestAcquireInstanceLockRecoversStalePIDZeroRecord(t *testing.T) {
 	if !state.owned || state.reused {
 		t.Fatalf("lock state = %#v, want fresh owned lock after stale recovery", state)
 	}
-	if state.pid != os.Getpid() {
-		t.Fatalf("pid = %d, want %d", state.pid, os.Getpid())
+	if state.record.PID != os.Getpid() {
+		t.Fatalf("pid = %d, want %d", state.record.PID, os.Getpid())
 	}
 
-	data, err := os.ReadFile(path)
+	record, err := readLockRecord(path)
 	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
+		t.Fatalf("readLockRecord() error = %v", err)
 	}
-	want := fmt.Sprintf("%d:0", os.Getpid())
-	if string(data) != want {
-		t.Fatalf("lock contents = %q, want %q", string(data), want)
+	if record.PID != os.Getpid() || record.Port != 0 {
+		t.Fatalf("lock record = %#v, want current pid and port 0", record)
 	}
 }
 
@@ -284,8 +281,8 @@ func TestAcquireInstanceLockReusesLiveReachablePortRecord(t *testing.T) {
 	if !localhostPortReachable(port, 250*time.Millisecond) {
 		t.Skipf("localhost loopback is unavailable in this environment; localhostPortReachable(%d) returned false", port)
 	}
-	if err := os.WriteFile(path, []byte(fmt.Sprintf("%d:%d", os.Getpid(), port)), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
+	if err := writeInstanceRecord(path, instanceRecord{PID: os.Getpid(), Port: port, Mode: ModeBrowser}); err != nil {
+		t.Fatalf("writeInstanceRecord() error = %v", err)
 	}
 
 	state, err := acquireInstanceLock(root, "runtime-lock-live-port")
@@ -296,11 +293,11 @@ func TestAcquireInstanceLockReusesLiveReachablePortRecord(t *testing.T) {
 	if state == nil || !state.reused || state.owned {
 		t.Fatalf("lock state = %#v, want reused reachable-port lock", state)
 	}
-	if state.pid != os.Getpid() {
-		t.Fatalf("pid = %d, want %d", state.pid, os.Getpid())
+	if state.record.PID != os.Getpid() {
+		t.Fatalf("pid = %d, want %d", state.record.PID, os.Getpid())
 	}
-	if state.port != port {
-		t.Fatalf("port = %d, want %d", state.port, port)
+	if state.record.Port != port {
+		t.Fatalf("port = %d, want %d", state.record.Port, port)
 	}
 }
 
@@ -316,8 +313,8 @@ func TestAcquireInstanceLockRecoversStaleClosedPortRecord(t *testing.T) {
 
 	root := t.TempDir()
 	path := lockFilePath(root, "runtime-lock-closed-port")
-	if err := os.WriteFile(path, []byte(fmt.Sprintf("%d:%d", os.Getpid(), port)), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
+	if err := writeInstanceRecord(path, instanceRecord{PID: os.Getpid(), Port: port, Mode: ModeBrowser}); err != nil {
+		t.Fatalf("writeInstanceRecord() error = %v", err)
 	}
 
 	state, err := acquireInstanceLock(root, "runtime-lock-closed-port")
@@ -329,25 +326,61 @@ func TestAcquireInstanceLockRecoversStaleClosedPortRecord(t *testing.T) {
 	if !state.owned || state.reused {
 		t.Fatalf("lock state = %#v, want fresh owned lock after closed-port recovery", state)
 	}
-	if state.pid != os.Getpid() {
-		t.Fatalf("pid = %d, want %d", state.pid, os.Getpid())
+	if state.record.PID != os.Getpid() {
+		t.Fatalf("pid = %d, want %d", state.record.PID, os.Getpid())
 	}
-	if state.port != 0 {
-		t.Fatalf("port = %d, want 0", state.port)
+	if state.record.Port != 0 {
+		t.Fatalf("port = %d, want 0", state.record.Port)
 	}
 
-	data, err := os.ReadFile(path)
+	record, err := readLockRecord(path)
 	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
+		t.Fatalf("readLockRecord() error = %v", err)
 	}
-	want := fmt.Sprintf("%d:0", os.Getpid())
-	if string(data) != want {
-		t.Fatalf("lock contents = %q, want %q", string(data), want)
+	if record.PID != os.Getpid() || record.Port != 0 {
+		t.Fatalf("lock record = %#v, want current pid and port 0", record)
+	}
+}
+
+func TestWriteInstanceRecordPreservesModeAndWindow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "instance.lock")
+	want := instanceRecord{
+		PID:  os.Getpid(),
+		Port: 43210,
+		Mode: ModeWebview,
+		Window: instanceWindowRecord{
+			Platform: "windows",
+			ID:       "0x1234",
+		},
+	}
+	if err := writeInstanceRecord(path, want); err != nil {
+		t.Fatalf("writeInstanceRecord() error = %v", err)
+	}
+	got, err := readLockRecord(path)
+	if err != nil {
+		t.Fatalf("readLockRecord() error = %v", err)
+	}
+	if *got != want {
+		t.Fatalf("record = %#v, want %#v", *got, want)
+	}
+}
+
+func TestReadLockRecordAcceptsLegacyTextRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.lock")
+	if err := os.WriteFile(path, []byte(fmt.Sprintf("%d:%d", os.Getpid(), 12345)), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	record, err := readLockRecord(path)
+	if err != nil {
+		t.Fatalf("readLockRecord() error = %v", err)
+	}
+	if record.PID != os.Getpid() || record.Port != 12345 {
+		t.Fatalf("record = %#v, want legacy pid and port", record)
 	}
 }
 
 func TestDecideExistingInstanceActionOpensBrowserForRunningBrowserInstance(t *testing.T) {
-	action := decideExistingInstanceAction(Config{Mode: ModeBrowser}, &lockState{pid: os.Getpid(), port: 43123, reused: true})
+	action := decideExistingInstanceAction(Config{Mode: ModeBrowser}, &lockState{record: instanceRecord{PID: os.Getpid(), Port: 43123}, reused: true})
 
 	if action.continueStartup {
 		t.Fatal("continueStartup = true, want false")
@@ -372,7 +405,7 @@ func TestDecideExistingInstanceActionContinuesStartupWithoutExistingLock(t *test
 }
 
 func TestDecideExistingInstanceActionSkipsBrowserReopenWhileOtherInstanceStarts(t *testing.T) {
-	action := decideExistingInstanceAction(Config{Mode: ModeBrowser}, &lockState{pid: os.Getpid(), port: 0, reused: true})
+	action := decideExistingInstanceAction(Config{Mode: ModeBrowser}, &lockState{record: instanceRecord{PID: os.Getpid(), Port: 0}, reused: true})
 
 	if action.continueStartup {
 		t.Fatal("continueStartup = true, want false")
@@ -383,7 +416,8 @@ func TestDecideExistingInstanceActionSkipsBrowserReopenWhileOtherInstanceStarts(
 }
 
 func TestDecideExistingInstanceActionExitsQuietlyForWebviewInstance(t *testing.T) {
-	action := decideExistingInstanceAction(Config{Mode: ModeWebview}, &lockState{pid: os.Getpid(), port: 43123, reused: true})
+	record := instanceRecord{PID: os.Getpid(), Port: 43123, Mode: ModeWebview}
+	action := decideExistingInstanceAction(Config{Mode: ModeWebview}, &lockState{record: record, reused: true})
 
 	if action.continueStartup {
 		t.Fatal("continueStartup = true, want false")
@@ -394,10 +428,16 @@ func TestDecideExistingInstanceActionExitsQuietlyForWebviewInstance(t *testing.T
 	if action.browserURL != "" {
 		t.Fatalf("browserURL = %q, want empty", action.browserURL)
 	}
+	if !action.focusExisting {
+		t.Fatal("focusExisting = false, want true")
+	}
+	if action.record != record {
+		t.Fatalf("record = %#v, want %#v", action.record, record)
+	}
 }
 
 func TestDecideExistingInstanceActionExitsQuietlyForHeadlessRelaunch(t *testing.T) {
-	action := decideExistingInstanceAction(Config{Mode: ModeBrowser, Headless: true}, &lockState{pid: os.Getpid(), port: 43123, reused: true})
+	action := decideExistingInstanceAction(Config{Mode: ModeBrowser, Headless: true}, &lockState{record: instanceRecord{PID: os.Getpid(), Port: 43123}, reused: true})
 
 	if action.continueStartup {
 		t.Fatal("continueStartup = true, want false")

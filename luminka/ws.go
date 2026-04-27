@@ -24,7 +24,10 @@ type wsMessage struct {
 	Ok              *bool           `json:"ok,omitempty"`
 	Error           string          `json:"error,omitempty"`
 	Path            string          `json:"path,omitempty"`
-	Data            string          `json:"data,omitempty"`
+	Data            json.RawMessage `json:"data,omitempty"`
+	Channel         string          `json:"channel,omitempty"`
+	ContentType     string          `json:"content_type,omitempty"`
+	Echo            bool            `json:"echo,omitempty"`
 	Files           []string        `json:"files,omitempty"`
 	Exists          *bool           `json:"exists,omitempty"`
 	Runner          string          `json:"runner,omitempty"`
@@ -66,7 +69,10 @@ func (m wsMessage) MarshalJSON() ([]byte, error) {
 		Ok              *bool            `json:"ok,omitempty"`
 		Error           string           `json:"error,omitempty"`
 		Path            string           `json:"path,omitempty"`
-		Data            string           `json:"data,omitempty"`
+		Data            json.RawMessage  `json:"data,omitempty"`
+		Channel         string           `json:"channel,omitempty"`
+		ContentType     string           `json:"content_type,omitempty"`
+		Echo            bool             `json:"echo,omitempty"`
 		Files           []string         `json:"files,omitempty"`
 		Exists          *bool            `json:"exists,omitempty"`
 		Runner          string           `json:"runner,omitempty"`
@@ -96,6 +102,9 @@ func (m wsMessage) MarshalJSON() ([]byte, error) {
 		Error:           m.Error,
 		Path:            m.Path,
 		Data:            m.Data,
+		Channel:         m.Channel,
+		ContentType:     m.ContentType,
+		Echo:            m.Echo,
 		Files:           m.Files,
 		Exists:          m.Exists,
 		Runner:          m.Runner,
@@ -122,6 +131,25 @@ func (m wsMessage) MarshalJSON() ([]byte, error) {
 		out.Capabilities = &caps
 	}
 	return json.Marshal(out)
+}
+
+func (m wsMessage) dataString() string {
+	if len(m.Data) == 0 {
+		return ""
+	}
+	var value string
+	if err := json.Unmarshal(m.Data, &value); err == nil {
+		return value
+	}
+	return string(m.Data)
+}
+
+func rawStringData(value string) json.RawMessage {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 func (rt *Runtime) serveWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +210,8 @@ func (rt *Runtime) handleWebSocketSession(wsConn *wsConnection) {
 			})
 		case "fs_read_text", "fs_write_text", "fs_list", "fs_delete", "fs_exists", "fs_watch", "fs_unwatch", "fs_open_read", "fs_open_write", "stream_chunk", "stream_close":
 			_ = rt.handleFilesystemRequest(wsConn, request, payload)
+		case "broadcast":
+			_ = rt.handleBroadcastRequest(wsConn, request, payload)
 		case "script_exec":
 			_ = rt.handleScriptRequest(wsConn, request)
 		case "script_exec_stream":
@@ -303,6 +333,21 @@ func (rt *Runtime) connectionSnapshot() []*wsConnection {
 	out := make([]*wsConnection, 0, len(rt.connections))
 	for conn := range rt.connections {
 		out = append(out, conn)
+	}
+	return out
+}
+
+func (rt *Runtime) connectionSnapshotExcluding(excluded *wsConnection) []*wsConnection {
+	if rt == nil {
+		return nil
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	out := make([]*wsConnection, 0, len(rt.connections))
+	for conn := range rt.connections {
+		if conn != excluded {
+			out = append(out, conn)
+		}
 	}
 	return out
 }

@@ -32,6 +32,9 @@ func runWebview(rt *Runtime) error {
 	}
 	wv.SetSize(rt.WindowWidth, rt.WindowHeight, hint)
 	wv.Navigate(localURL(rt.Port))
+	if window := detectCurrentWindowIdentity(rt.WindowTitle); window.Platform != "" && window.ID != "" {
+		_ = writeRuntimeWindowIdentity(rt, window)
+	}
 
 	go func() {
 		<-rt.shutdownCh

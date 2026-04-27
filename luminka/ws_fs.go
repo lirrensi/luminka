@@ -33,7 +33,7 @@ func (rt *Runtime) handleFilesystemRequest(conn *wsConnection, request wsMessage
 		text := string(data)
 		return writeFSResponse(conn, request.ID, true, "", &text, nil, nil)
 	case "fs_write_text":
-		if err := rt.FSBridge.WriteBytes(request.Path, []byte(request.Data)); err != nil {
+		if err := rt.FSBridge.WriteBytes(request.Path, []byte(request.dataString())); err != nil {
 			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
 		}
 		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)

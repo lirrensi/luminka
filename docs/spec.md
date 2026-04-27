@@ -31,10 +31,12 @@ This specification covers:
 - portable and detached root policies,
 - normal and headless launch behavior,
 - single-instance behavior per resolved app root,
+- best-effort foregrounding of existing webview instances,
 - runtime capability gating,
 - WebSocket transport contracts,
 - chunked byte streams,
 - SDK-level tracked text file behavior,
+- runtime broadcast events and SDK multi-tab coordination primitives,
 - default external data location,
 - lifecycle and shutdown behavior.
 
@@ -209,8 +211,8 @@ If the executable is launched and a live instance already exists for that resolv
 In that case:
 
 - a browser build SHOULD open the existing app URL in a new browser tab or window and then exit,
-- a webview build MAY attempt to focus or re-open the existing instance if supported,
-- any implementation MAY simply exit after detecting the existing live instance if platform focus behavior is not available.
+- a webview build SHOULD attempt to bring the existing native window to the foreground when platform support exists,
+- if native focus is unavailable or fails, the implementation MAY exit after detecting the existing live instance.
 
 If stale instance state is found, the runtime MUST recover by discarding the stale state and proceeding with normal startup.
 
@@ -255,6 +257,8 @@ The runtime MUST listen only on loopback interfaces.
 The frontend communicates with the runtime over WebSocket. The canonical endpoint path is `/ws`.
 
 The runtime MAY use HTTP to serve embedded assets, but REST-style HTTP APIs are not the canonical capability surface.
+
+The runtime MAY support transient broadcast messages between active WebSocket clients connected to the same runtime instance and resolved app root.
 
 ### 8. WebSocket Frame Envelope
 
@@ -412,7 +416,67 @@ When `save` completes successfully, the helper MUST update its current known tex
 
 The helper MAY expose raw watch events separately for advanced callers, but raw events MUST remain distinguishable from meaningful external content-change callbacks.
 
-### 14. Script Execution Capability
+### 14. Runtime Broadcast Events
+
+Luminka MAY support a runtime-local broadcast primitive for connected frontend clients.
+
+If broadcast support is implemented, the runtime MUST accept a `broadcast` request containing a channel name, arbitrary JSON metadata, and optional payload bytes.
+
+Example request header:
+
+```json
+{
+  "event": "broadcast",
+  "id": "b1",
+  "channel": "workspace",
+  "data": { "type": "active-session", "session_id": "tab-1" }
+}
+```
+
+Successful response header:
+
+```json
+{ "event": "broadcast_response", "id": "b1", "ok": true }
+```
+
+Server-pushed broadcast header:
+
+```json
+{
+  "event": "broadcast",
+  "channel": "workspace",
+  "data": { "type": "active-session", "session_id": "tab-1" }
+}
+```
+
+The runtime MUST deliver a broadcast only to active WebSocket clients connected to the same runtime instance and resolved app root.
+
+The runtime SHOULD default to delivering a broadcast to clients other than the sender. An implementation MAY expose an explicit echo option if sender delivery is useful.
+
+Broadcasts MUST be transient. The runtime MUST NOT persist broadcast messages or treat them as authoritative application state.
+
+The runtime MUST NOT define application-level semantics for broadcast messages. Multi-tab coordination, dirty-state handling, primary-tab behavior, stale-data handling, and merge policy remain frontend or application responsibilities.
+
+### 15. SDK Multi-Tab Coordination Helper
+
+A conforming product implementation SHOULD provide an opt-in SDK helper built on top of runtime broadcast events for browser multi-tab coordination.
+
+The helper SHOULD expose behavior equivalent to:
+
+| Operation | Behavior |
+|---|---|
+| create multi-tab coordinator | Bind coordination to a named channel or scope |
+| start | Generate or use a frontend session ID and announce presence |
+| stop/dispose | Stop heartbeats and remove listeners |
+| send peer message | Broadcast arbitrary app-defined coordination data |
+| observe peers | Notify the app when peers appear, update, or disappear |
+| observe primary session | Notify the app when the primary session changes |
+
+The default primary election rule SHOULD treat the oldest active session as primary. Newer sessions SHOULD become non-primary unless the application implements a different policy on top of the helper.
+
+The helper MUST NOT force secondary tabs to close, become read-only, reload, or block editing. It exposes coordination state; the application decides UI and data policy.
+
+### 16. Script Execution Capability
 
 If script capability is enabled, the runtime MUST support synchronous execution and MAY additionally support stream-mode execution.
 
@@ -485,7 +549,7 @@ If the selected external script is missing from the allowed root, or the selecte
 
 If script capability is disabled, `script_exec` MUST fail explicitly.
 
-### 15. Shell Execution Capability
+### 17. Shell Execution Capability
 
 If shell capability is enabled, the runtime MUST support synchronous execution and MAY additionally support stream-mode execution.
 
@@ -532,7 +596,7 @@ General stdin streaming is not required in v1 of this stream model.
 
 If shell capability is disabled, `shell_exec` MUST fail explicitly.
 
-### 16. Idle and Shutdown Behavior
+### 18. Idle and Shutdown Behavior
 
 Browser builds SHOULD shut down after a configurable idle period once all active frontend connections are gone.
 
@@ -577,7 +641,16 @@ Providing generated artifacts does not replace the canonical TypeScript source. 
 
 An implementation MUST persist enough state to detect whether another live instance already owns the current resolved app root.
 
-The reference model uses a lock file containing `PID:port` in the resolved app root.
+The reference model uses a structured instance record in the resolved app root.
+
+The record SHOULD include at least:
+
+| Field | Meaning |
+|---|---|
+| `pid` | Owning runtime process ID |
+| `port` | Localhost runtime port |
+| `mode` | Display profile for the running instance |
+| `window` | Optional platform window identity for native focus behavior |
 
 Equivalent mechanisms are permitted if they preserve the same observable behavior.
 

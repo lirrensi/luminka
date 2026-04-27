@@ -97,8 +97,7 @@ type Runtime struct {
 
 type lockState struct {
 	path   string
-	pid    int
-	port   int
+	record instanceRecord
 	owned  bool
 	reused bool
 }
@@ -107,6 +106,8 @@ type existingInstanceAction struct {
 	continueStartup bool
 	openBrowser     bool
 	browserURL      string
+	focusExisting   bool
+	record          instanceRecord
 }
 
 func Run(cfg Config) (err error) {
@@ -131,6 +132,9 @@ func Run(cfg Config) (err error) {
 		if action.openBrowser {
 			return openBrowser(action.browserURL)
 		}
+		if action.focusExisting {
+			_ = focusExistingInstance(action.record)
+		}
 		return nil
 	}
 
@@ -143,7 +147,7 @@ func Run(cfg Config) (err error) {
 	if err = startServer(rt); err != nil {
 		return err
 	}
-	if err = writeLockPort(rt.LockPath, rt.PID, rt.Port); err != nil {
+	if err = writeInstanceRecord(rt.LockPath, instanceRecord{PID: rt.PID, Port: rt.Port, Mode: rt.Mode}); err != nil {
 		return err
 	}
 
@@ -169,12 +173,12 @@ func decideExistingInstanceAction(cfg Config, existing *lockState) existingInsta
 	}
 	switch cfg.Mode {
 	case ModeBrowser:
-		if existing.port > 0 {
-			return existingInstanceAction{openBrowser: true, browserURL: localURL(existing.port)}
+		if existing.record.Port > 0 {
+			return existingInstanceAction{openBrowser: true, browserURL: localURL(existing.record.Port)}
 		}
 		return existingInstanceAction{}
 	case ModeWebview:
-		return existingInstanceAction{}
+		return existingInstanceAction{focusExisting: true, record: existing.record}
 	default:
 		return existingInstanceAction{}
 	}
@@ -242,7 +246,7 @@ func prepareRuntime(cfg Config) (*Runtime, *lockState, error) {
 		Assets:          cfg.Assets,
 		ScriptAssets:    cfg.ScriptAssets,
 		LockPath:        state.path,
-		PID:             state.pid,
+		PID:             state.record.PID,
 		ownedLock:       state.owned,
 		connections:     make(map[*wsConnection]struct{}),
 		streams:         newStreamRegistry(),

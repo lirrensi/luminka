@@ -398,6 +398,121 @@ test("LuminkaClient emits binary frames for script and shell streams", async () 
   assert.equal(result.code, 0);
 });
 
+test("LuminkaClient broadcast sends a JSON broadcast frame", async () => {
+  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
+  const pending = client.broadcast("workspace", { type: "ping" });
+  const socket = FakeWebSocket.instances[0];
+  assert.ok(socket, "expected WebSocket instance");
+
+  socket.open();
+  await flushAsyncWork();
+  const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
+  assert.equal(request.header.event, "broadcast");
+  assert.equal(request.header.channel, "workspace");
+  assert.deepEqual(request.header.data, { type: "ping" });
+  socket.message({ event: "broadcast_response", id: request.header.id, ok: true });
+  await pending;
+});
+
+test("LuminkaClient onBroadcast receives pushed frames for matching channel only", async () => {
+  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
+  await openClient(client);
+  const socket = FakeWebSocket.instances[0];
+  const messages: unknown[] = [];
+  client.onBroadcast("workspace", (message) => messages.push(message.data));
+
+  socket.message({ event: "broadcast", channel: "other", data: { type: "skip" } });
+  socket.message({ event: "broadcast", channel: "workspace", data: { type: "ping" } }, new Uint8Array([7]));
+  await flushAsyncWork();
+
+  assert.deepEqual(messages, [{ type: "ping" }]);
+});
+
+test("LuminkaClient multi-tab coordinators elect the older session as primary", async () => {
+  const older = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
+  const first = older.createMultiTabCoordinator("main", { sessionId: "older", heartbeatMs: 10, staleMs: 50 });
+  await new Promise((resolve) => globalThis.setTimeout(resolve, 2));
+  const newer = new LuminkaClient({ url: "ws://127.0.0.1:7778/ws" });
+  const second = newer.createMultiTabCoordinator("main", { sessionId: "newer", heartbeatMs: 10, staleMs: 50 });
+
+  const startFirst = first.start();
+  const firstSocket = FakeWebSocket.instances[0];
+  firstSocket.open();
+  await flushAsyncWork();
+  acknowledgeLastBroadcast(firstSocket);
+  await startFirst;
+
+  const startSecond = second.start();
+  const secondSocket = FakeWebSocket.instances[1];
+  secondSocket.open();
+  await flushAsyncWork();
+  acknowledgeLastBroadcast(secondSocket);
+  await startSecond;
+
+  deliverLastBroadcast(secondSocket, firstSocket);
+  deliverLastBroadcast(firstSocket, secondSocket);
+  await flushAsyncWork();
+
+  assert.equal(first.getPrimary()?.sessionId, "older");
+  assert.equal(second.getPrimary()?.sessionId, "older");
+  assert.equal(first.isPrimary(), true);
+  assert.equal(second.isPrimary(), false);
+
+  const stopFirst = first.stop();
+  await flushAsyncWork();
+  acknowledgeLastBroadcast(firstSocket);
+  await stopFirst;
+  const stopSecond = second.stop();
+  await flushAsyncWork();
+  acknowledgeLastBroadcast(secondSocket);
+  await stopSecond;
+});
+
+test("LuminkaClient multi-tab coordinator removes peers on bye", async () => {
+  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
+  const coordinator = client.createMultiTabCoordinator("main", { sessionId: "local", heartbeatMs: 10, staleMs: 50 });
+  const start = coordinator.start();
+  const socket = FakeWebSocket.instances[0];
+  socket.open();
+  await flushAsyncWork();
+  acknowledgeLastBroadcast(socket);
+  await start;
+
+  socket.message({ event: "broadcast", channel: "luminka:multi-tab:main", data: { kind: "hello", sessionId: "peer", startedAt: 1 } });
+  await flushAsyncWork();
+  assert.equal(coordinator.getPrimary()?.sessionId, "peer");
+
+  socket.message({ event: "broadcast", channel: "luminka:multi-tab:main", data: { kind: "bye", sessionId: "peer", startedAt: 1 } });
+  await flushAsyncWork();
+  assert.equal(coordinator.getPrimary()?.sessionId, "local");
+  assert.equal(coordinator.getPeers().some((peer) => peer.sessionId === "peer"), false);
+
+  const stop = coordinator.stop();
+  await flushAsyncWork();
+  acknowledgeLastBroadcast(socket);
+  await stop;
+});
+
+async function openClient(client: LuminkaClient): Promise<void> {
+  const pending = client.connect();
+  const socket = FakeWebSocket.instances.at(-1);
+  assert.ok(socket, "expected WebSocket instance");
+  socket.open();
+  await pending;
+}
+
+function acknowledgeLastBroadcast(socket: FakeWebSocket): void {
+  const request = decodeLuminkaFrame(socket.sent.at(-1) ?? new Uint8Array()).header;
+  assert.equal(request.event, "broadcast");
+  socket.message({ event: "broadcast_response", id: request.id, ok: true });
+}
+
+function deliverLastBroadcast(from: FakeWebSocket, to: FakeWebSocket): void {
+  const frame = decodeLuminkaFrame(from.sent.at(-1) ?? new Uint8Array());
+  assert.equal(frame.header.event, "broadcast");
+  to.message({ event: "broadcast", channel: frame.header.channel, data: frame.header.data, content_type: frame.header.content_type }, frame.payload);
+}
+
 async function collectStreamText(stream: ReadableStream<Uint8Array>): Promise<string> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];

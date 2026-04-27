@@ -29,7 +29,7 @@ It is especially aimed at small local-first tools, internal utilities, mini-apps
 
 ## Core Capabilities
 
-Luminka fundamentally provides seven things:
+Luminka fundamentally provides nine things:
 
 1. **Static app hosting inside a single binary**  
    A built frontend is embedded into the executable and served from inside it.
@@ -53,6 +53,12 @@ Luminka fundamentally provides seven things:
 
 7. **Friendly file-backed state helpers**
    For local-first apps that keep UI state in project files, the SDK provides higher-level tracked text file helpers that load, save, and subscribe to meaningful external changes while suppressing write echoes caused by the app's own saves.
+
+8. **Best-effort single-instance foregrounding**
+   When an app is already running for a resolved app root, Luminka reuses that instance instead of starting a competing runtime. Browser builds reopen the existing URL. WebView builds should attempt to bring the existing native window to the foreground when platform support exists.
+
+9. **Local runtime broadcast events**
+   Connected frontend clients in the same runtime instance can send transient broadcast events to each other through Luminka. This gives browser tabs and other frontend clients a simple coordination primitive without making Luminka own application state.
 
 ## Design Principles
 
@@ -123,7 +129,7 @@ At a high level, Luminka has four parts:
    Handles lifecycle, capability exposure, static serving, local process behavior, and browser/webview launching.
 
 2. **Canonical WebSocket transport**  
-   The wire-level contract between frontend and runtime, including chunked byte streams for file transfer and live process output.
+   The wire-level contract between frontend and runtime, including chunked byte streams for file transfer, live process output, and transient broadcast events between connected frontend clients.
 
 3. **TypeScript SDK**  
    A small in-repo client helper that hides transport details behind Node-inspired functions and stream helpers. The TypeScript source remains canonical, but Luminka should support both direct source consumption and generated JavaScript distribution artifacts.

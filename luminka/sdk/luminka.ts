@@ -1,8 +1,8 @@
 // FILE: luminka/sdk/luminka.ts
 // PURPOSE: Provide the browser-first Luminka WebSocket SDK for frontend apps.
-// OWNS: Binary WebSocket framing, request/response helpers, and file/process capability wrappers.
-// EXPORTS: LuminkaCapabilities, LuminkaAppInfo, LuminkaOptions, LuminkaFrame, TrackedTextFileOptions, TrackedTextFile, LuminkaClient, createLuminkaClient, encodeLuminkaFrame, decodeLuminkaFrame
-// DOCS: docs/spec.md, docs/arch.md, agent_chat/plan_luminka_stream_runtime_2026-04-01.md
+// OWNS: Binary WebSocket framing, request/response helpers, file/process capability wrappers, and transient broadcast coordination.
+// EXPORTS: LuminkaCapabilities, LuminkaAppInfo, LuminkaOptions, LuminkaFrame, LuminkaBroadcastMessage, LuminkaBroadcastOptions, MultiTabCoordinator, LuminkaClient, createLuminkaClient, encodeLuminkaFrame, decodeLuminkaFrame
+// DOCS: docs/spec.md, docs/arch.md, agent_chat/plan_luminka_stream_runtime_2026-04-01.md, agent_chat/plan_webview_focus_broadcast_2026-04-27.md
 
 const DEFAULT_WS_PATH = "/ws";
 const DEFAULT_CHUNK_SIZE = 32 * 1024;
@@ -35,7 +35,10 @@ export interface LuminkaFrame {
   ok?: boolean;
   error?: string;
   path?: string;
-  data?: string;
+  data?: unknown;
+  channel?: string;
+  content_type?: string;
+  echo?: boolean;
   files?: string[];
   exists?: boolean;
   runner?: string;
@@ -64,6 +67,49 @@ export interface ExecStreamResult {
   stderr: ReadableStream<Uint8Array>;
   completed: Promise<{ code: number | null; stdout: string; stderr: string }>;
 }
+
+export interface LuminkaBroadcastMessage<T = unknown> {
+  channel: string;
+  data?: T;
+  payload: Uint8Array;
+  contentType?: string;
+}
+
+export interface LuminkaBroadcastOptions {
+  echo?: boolean;
+  contentType?: string;
+}
+
+export interface MultiTabPeer {
+  sessionId: string;
+  startedAt: number;
+  lastSeenAt: number;
+  data?: unknown;
+}
+
+export interface MultiTabCoordinatorOptions {
+  sessionId?: string;
+  heartbeatMs?: number;
+  staleMs?: number;
+  data?: unknown;
+}
+
+export interface MultiTabCoordinator {
+  readonly channel: string;
+  readonly sessionId: string;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  isPrimary(): boolean;
+  getPrimary(): MultiTabPeer | null;
+  getPeers(): MultiTabPeer[];
+  send<T = unknown>(type: string, data?: T): Promise<void>;
+  onPeerJoined(listener: (peer: MultiTabPeer) => void | Promise<void>): () => void;
+  onPeerLeft(listener: (peer: MultiTabPeer) => void | Promise<void>): () => void;
+  onPrimaryChanged(listener: (peer: MultiTabPeer | null) => void | Promise<void>): () => void;
+  onMessage<T = unknown>(listener: (message: { from: MultiTabPeer; type: string; data?: T }) => void | Promise<void>): () => void;
+}
+
+type BroadcastListener = (message: LuminkaBroadcastMessage) => void | Promise<void>;
 
 export interface TrackedTextFileOptions {
   debounceMs?: number;
@@ -155,6 +201,7 @@ export class LuminkaClient {
   private readonly streams = new Map<string, StreamState>();
   private readonly pendingExecStreams = new Map<string, ExecStreamState>();
   private readonly fileListeners = new Set<(path: string) => void>();
+  private readonly broadcastListeners = new Map<string, Set<BroadcastListener>>();
 
   constructor(private readonly options: LuminkaOptions = {}) {}
 
@@ -323,6 +370,27 @@ export class LuminkaClient {
     return new LuminkaTrackedTextFile(this, path, options);
   }
 
+  async broadcast<T = unknown>(channel: string, data?: T, options: LuminkaBroadcastOptions = {}, payload: Uint8Array = new Uint8Array()): Promise<void> {
+    await this.request({ event: "broadcast", channel, data, echo: options.echo, content_type: options.contentType }, payload);
+  }
+
+  onBroadcast<T = unknown>(channel: string, listener: (message: LuminkaBroadcastMessage<T>) => void | Promise<void>): () => void {
+    const listeners = this.broadcastListeners.get(channel) ?? new Set<BroadcastListener>();
+    const wrapped = listener as BroadcastListener;
+    listeners.add(wrapped);
+    this.broadcastListeners.set(channel, listeners);
+    return () => {
+      listeners.delete(wrapped);
+      if (listeners.size === 0) {
+        this.broadcastListeners.delete(channel);
+      }
+    };
+  }
+
+  createMultiTabCoordinator(channel: string, options: MultiTabCoordinatorOptions = {}): MultiTabCoordinator {
+    return new LuminkaMultiTabCoordinator(this, channel, options);
+  }
+
   async runScript(runner: string, file: string, args: string[] = [], timeout?: number): Promise<{ stdout: string; stderr: string; code: number | null }> {
     const response = await this.request({ event: "script_exec", runner, file, args, timeout });
     return this.requireExecResult(response);
@@ -418,11 +486,11 @@ export class LuminkaClient {
     return execState;
   }
 
-  private async request(payload: Omit<LuminkaFrame, "id">): Promise<LuminkaFrame> {
+  private async request(payload: Omit<LuminkaFrame, "id">, requestPayload: Uint8Array = new Uint8Array()): Promise<LuminkaFrame> {
     await this.connect();
     const socket = this.requireSocket();
     const id = this.nextId();
-    const frame = encodeLuminkaFrame({ ...payload, id });
+    const frame = encodeLuminkaFrame({ ...payload, id }, requestPayload);
     return new Promise<LuminkaFrame>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       try {
@@ -457,6 +525,11 @@ export class LuminkaClient {
       for (const listener of this.fileListeners) {
         listener(message.header.path);
       }
+      return;
+    }
+
+    if (message.header.event === "broadcast" && message.header.channel) {
+      this.handleBroadcast(message.header, message.payload);
       return;
     }
 
@@ -519,6 +592,26 @@ export class LuminkaClient {
     }
     if (stream.kind === "exec") {
       this.appendExecChunk(stream, header.lane === "stderr" ? "stderr" : "stdout", payload);
+    }
+  }
+
+  private handleBroadcast(header: LuminkaFrame, payload: Uint8Array): void {
+    const channel = header.channel;
+    if (!channel) {
+      return;
+    }
+    const listeners = this.broadcastListeners.get(channel);
+    if (!listeners || listeners.size === 0) {
+      return;
+    }
+    const message: LuminkaBroadcastMessage = {
+      channel,
+      data: header.data,
+      payload,
+      contentType: header.content_type,
+    };
+    for (const listener of listeners) {
+      void Promise.resolve(listener(message));
     }
   }
 
@@ -946,6 +1039,190 @@ export function createLuminkaClient(options?: LuminkaOptions): LuminkaClient {
   return new LuminkaClient(options);
 }
 
+type MultiTabWireMessage = {
+  kind?: "hello" | "heartbeat" | "bye" | "message";
+  sessionId?: string;
+  startedAt?: number;
+  data?: unknown;
+  type?: string;
+};
+
+class LuminkaMultiTabCoordinator implements MultiTabCoordinator {
+  readonly sessionId: string;
+  private readonly broadcastChannel: string;
+  private readonly heartbeatMs: number;
+  private readonly staleMs: number;
+  private readonly startedAt: number;
+  private readonly data?: unknown;
+  private readonly peers = new Map<string, MultiTabPeer>();
+  private readonly peerJoinedListeners = new Set<(peer: MultiTabPeer) => void | Promise<void>>();
+  private readonly peerLeftListeners = new Set<(peer: MultiTabPeer) => void | Promise<void>>();
+  private readonly primaryChangedListeners = new Set<(peer: MultiTabPeer | null) => void | Promise<void>>();
+  private readonly messageListeners = new Set<(message: { from: MultiTabPeer; type: string; data?: unknown }) => void | Promise<void>>();
+  private unsubscribeBroadcast: (() => void) | null = null;
+  private heartbeatTimer: ReturnType<typeof globalThis.setInterval> | null = null;
+  private primary: MultiTabPeer | null = null;
+  private started = false;
+
+  constructor(private readonly client: LuminkaClient, readonly channel: string, options: MultiTabCoordinatorOptions) {
+    this.sessionId = options.sessionId ?? generateSessionId();
+    this.startedAt = Date.now();
+    this.heartbeatMs = isPositiveNumber(options.heartbeatMs) ? options.heartbeatMs : 1000;
+    this.staleMs = isPositiveNumber(options.staleMs) ? options.staleMs : this.heartbeatMs * 3;
+    this.data = options.data;
+    this.broadcastChannel = `luminka:multi-tab:${channel}`;
+    this.primary = this.selfPeer();
+  }
+
+  async start(): Promise<void> {
+    if (this.started) {
+      return;
+    }
+    this.started = true;
+    this.unsubscribeBroadcast = this.client.onBroadcast<MultiTabWireMessage>(this.broadcastChannel, (message) => this.receive(message.data));
+    void this.sendControl("hello");
+    this.heartbeatTimer = globalThis.setInterval(() => {
+      this.removeStalePeers();
+      void this.sendControl("heartbeat");
+    }, this.heartbeatMs);
+    this.recomputePrimary();
+  }
+
+  async stop(): Promise<void> {
+    if (!this.started) {
+      return;
+    }
+    void this.sendControl("bye");
+    this.started = false;
+    if (this.heartbeatTimer) {
+      globalThis.clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    if (this.unsubscribeBroadcast) {
+      this.unsubscribeBroadcast();
+      this.unsubscribeBroadcast = null;
+    }
+    this.peers.clear();
+    this.recomputePrimary();
+  }
+
+  isPrimary(): boolean {
+    return this.getPrimary()?.sessionId === this.sessionId;
+  }
+
+  getPrimary(): MultiTabPeer | null {
+    return this.primary ? { ...this.primary } : null;
+  }
+
+  getPeers(): MultiTabPeer[] {
+    return [this.selfPeer(), ...Array.from(this.peers.values()).map((peer) => ({ ...peer }))].sort(comparePeers);
+  }
+
+  async send<T = unknown>(type: string, data?: T): Promise<void> {
+    await this.client.broadcast(this.broadcastChannel, this.baseMessage("message", { type, data }));
+  }
+
+  onPeerJoined(listener: (peer: MultiTabPeer) => void | Promise<void>): () => void {
+    this.peerJoinedListeners.add(listener);
+    return () => this.peerJoinedListeners.delete(listener);
+  }
+
+  onPeerLeft(listener: (peer: MultiTabPeer) => void | Promise<void>): () => void {
+    this.peerLeftListeners.add(listener);
+    return () => this.peerLeftListeners.delete(listener);
+  }
+
+  onPrimaryChanged(listener: (peer: MultiTabPeer | null) => void | Promise<void>): () => void {
+    this.primaryChangedListeners.add(listener);
+    return () => this.primaryChangedListeners.delete(listener);
+  }
+
+  onMessage<T = unknown>(listener: (message: { from: MultiTabPeer; type: string; data?: T }) => void | Promise<void>): () => void {
+    const wrapped = listener as (message: { from: MultiTabPeer; type: string; data?: unknown }) => void | Promise<void>;
+    this.messageListeners.add(wrapped);
+    return () => this.messageListeners.delete(wrapped);
+  }
+
+  private async sendControl(kind: "hello" | "heartbeat" | "bye"): Promise<void> {
+    await this.client.broadcast(this.broadcastChannel, this.baseMessage(kind));
+  }
+
+  private baseMessage(kind: MultiTabWireMessage["kind"], extra: Partial<MultiTabWireMessage> = {}): MultiTabWireMessage {
+    return { kind, sessionId: this.sessionId, startedAt: this.startedAt, data: this.data, ...extra };
+  }
+
+  private receive(message: MultiTabWireMessage | undefined): void {
+    if (!message || !message.kind || !message.sessionId || message.sessionId === this.sessionId || typeof message.startedAt !== "number") {
+      return;
+    }
+    if (message.kind === "bye") {
+      this.removePeer(message.sessionId);
+      return;
+    }
+    const peer = this.upsertPeer(message);
+    if (message.kind === "message" && message.type) {
+      for (const listener of this.messageListeners) {
+        void Promise.resolve(listener({ from: { ...peer }, type: message.type, data: message.data }));
+      }
+    }
+  }
+
+  private upsertPeer(message: MultiTabWireMessage): MultiTabPeer {
+    const existing = this.peers.get(message.sessionId!);
+    const peer: MultiTabPeer = {
+      sessionId: message.sessionId!,
+      startedAt: message.startedAt!,
+      lastSeenAt: Date.now(),
+      data: message.kind === "message" ? existing?.data : message.data,
+    };
+    this.peers.set(peer.sessionId, peer);
+    if (!existing) {
+      for (const listener of this.peerJoinedListeners) {
+        void Promise.resolve(listener({ ...peer }));
+      }
+    }
+    this.recomputePrimary();
+    return peer;
+  }
+
+  private removePeer(sessionId: string): void {
+    const peer = this.peers.get(sessionId);
+    if (!peer) {
+      return;
+    }
+    this.peers.delete(sessionId);
+    for (const listener of this.peerLeftListeners) {
+      void Promise.resolve(listener({ ...peer }));
+    }
+    this.recomputePrimary();
+  }
+
+  private removeStalePeers(): void {
+    const now = Date.now();
+    for (const peer of this.peers.values()) {
+      if (now - peer.lastSeenAt > this.staleMs) {
+        this.removePeer(peer.sessionId);
+      }
+    }
+  }
+
+  private recomputePrimary(): void {
+    const next = this.getPeers()[0] ?? null;
+    if ((next?.sessionId ?? null) === (this.primary?.sessionId ?? null)) {
+      this.primary = next;
+      return;
+    }
+    this.primary = next;
+    for (const listener of this.primaryChangedListeners) {
+      void Promise.resolve(listener(next ? { ...next } : null));
+    }
+  }
+
+  private selfPeer(): MultiTabPeer {
+    return { sessionId: this.sessionId, startedAt: this.startedAt, lastSeenAt: Date.now(), data: this.data };
+  }
+}
+
 function createDeferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
   let reject!: (error: Error) => void;
@@ -958,6 +1235,22 @@ function createDeferred<T>(): Deferred<T> {
 
 function isNonNegativeNumber(value: unknown): value is number {
   return typeof value === "number" && value >= 0;
+}
+
+function isPositiveNumber(value: unknown): value is number {
+  return typeof value === "number" && value > 0;
+}
+
+function generateSessionId(): string {
+  const random = Math.random().toString(36).slice(2);
+  return `session-${Date.now().toString(36)}-${random}`;
+}
+
+function comparePeers(a: MultiTabPeer, b: MultiTabPeer): number {
+  if (a.startedAt !== b.startedAt) {
+    return a.startedAt - b.startedAt;
+  }
+  return a.sessionId.localeCompare(b.sessionId);
 }
 
 function safeNotifyText(listener: (text: string) => void | Promise<void>, text: string): void {

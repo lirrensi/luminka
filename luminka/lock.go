@@ -7,6 +7,7 @@
 package luminka
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -75,7 +76,7 @@ func acquireInstanceLock(root, name string) (*lockState, error) {
 	for {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
-			if _, writeErr := fmt.Fprintf(f, "%d:0", pid); writeErr != nil {
+			if writeErr := json.NewEncoder(f).Encode(instanceRecord{PID: pid, Port: 0}); writeErr != nil {
 				_ = f.Close()
 				_ = os.Remove(path)
 				return nil, writeErr
@@ -84,7 +85,7 @@ func acquireInstanceLock(root, name string) (*lockState, error) {
 				_ = os.Remove(path)
 				return nil, closeErr
 			}
-			return &lockState{path: path, pid: pid, owned: true}, nil
+			return &lockState{path: path, record: instanceRecord{PID: pid, Port: 0}, owned: true}, nil
 		}
 		if !os.IsExist(err) {
 			return nil, err
@@ -98,18 +99,18 @@ func acquireInstanceLock(root, name string) (*lockState, error) {
 			continue
 		}
 
-		if processAlive(record.pid) {
-			if record.port > 0 {
-				if localhostPortReachable(record.port, 250*time.Millisecond) {
-					return &lockState{path: path, pid: record.pid, port: record.port, reused: true}, nil
+		if processAlive(record.PID) {
+			if record.Port > 0 {
+				if localhostPortReachable(record.Port, 250*time.Millisecond) {
+					return &lockState{path: path, record: *record, reused: true}, nil
 				}
 				if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
 					return nil, removeErr
 				}
 				continue
 			}
-			if record.port == 0 {
-				return &lockState{path: path, pid: record.pid, port: 0, reused: true}, nil
+			if record.Port == 0 {
+				return &lockState{path: path, record: *record, reused: true}, nil
 			}
 		}
 
@@ -128,21 +129,32 @@ func localhostPortReachable(port int, timeout time.Duration) bool {
 	return true
 }
 
-type lockRecord struct {
-	pid  int
-	port int
+type instanceRecord struct {
+	PID    int                  `json:"pid"`
+	Port   int                  `json:"port"`
+	Mode   Mode                 `json:"mode,omitempty"`
+	Window instanceWindowRecord `json:"window,omitempty"`
 }
 
-func readLockRecord(path string) (*lockRecord, error) {
+type instanceWindowRecord struct {
+	Platform string `json:"platform,omitempty"`
+	ID       string `json:"id,omitempty"`
+}
+
+func readLockRecord(path string) (*instanceRecord, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	pid, port, err := parseLockRecord(string(data))
-	if err != nil {
-		return nil, err
+	var record instanceRecord
+	if err := json.Unmarshal(data, &record); err == nil && record.PID > 0 {
+		return &record, nil
 	}
-	return &lockRecord{pid: pid, port: port}, nil
+	pid, port, parseErr := parseLockRecord(string(data))
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	return &instanceRecord{PID: pid, Port: port}, nil
 }
 
 func parseLockRecord(raw string) (int, int, error) {
@@ -165,8 +177,13 @@ func parseLockRecord(raw string) (int, int, error) {
 	return pid, port, nil
 }
 
-func writeLockPort(path string, pid, port int) error {
-	return os.WriteFile(path, []byte(fmt.Sprintf("%d:%d", pid, port)), 0o644)
+func writeInstanceRecord(path string, record instanceRecord) error {
+	data, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(path, data, 0o644)
 }
 
 func removeLockFile(path string) error {

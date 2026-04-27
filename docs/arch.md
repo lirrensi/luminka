@@ -10,7 +10,7 @@ The current architecture target is no longer a text-only request/response bridge
 
 ## Scope Boundary
 
-**Owns**: embedded asset serving, localhost runtime, binary WebSocket framing, stream session management, capability gating, filesystem bridge, script bridge, shell bridge, single-instance handling, root policy resolution, browser/webview shell launching, headless launch behavior, starter scaffold, example apps, TS SDK including tracked text file helpers, packaging hooks for app icons
+**Owns**: embedded asset serving, localhost runtime, binary WebSocket framing, stream session management, capability gating, filesystem bridge, script bridge, shell bridge, single-instance handling, native window focus, runtime broadcast events, root policy resolution, browser/webview shell launching, headless launch behavior, starter scaffold, example apps, TS SDK including tracked text file helpers and multi-tab coordination helpers, packaging hooks for app icons
 
 **Does not own**: frontend build pipelines, application-specific data schemas, remote networking, auth, cloud sync, npm distribution, PTY emulation
 
@@ -118,7 +118,8 @@ Implementation direction:
 - decoding the JSON header,
 - preserving request/response correlation,
 - handing off payload-bearing frames to stream sessions,
-- pushing notifications such as `fs_changed`.
+- pushing notifications such as `fs_changed`,
+- routing transient `broadcast` events between connected frontend clients in the same runtime instance.
 
 The transport layer uses the canonical frame shape:
 
@@ -198,11 +199,16 @@ It MUST remain separate from the script bridge. No implicit fallback is allowed.
 - single-instance detection,
 - stale lock recovery,
 - runtime-local artifact cleanup,
-- instance state based on app name and resolved root.
+- instance state based on app name and resolved root,
+- best-effort foregrounding of existing native webview windows.
 
 The canonical state location is the resolved app root.
 
-If a live instance is already present for the current resolved root, startup short-circuits and opens the preserved localhost URL in the default browser instead of starting a second server when that behavior is appropriate for the active display and launch mode.
+Instance state is a structured record rather than a fixed text tuple. It stores process ID, port, mode, and optional platform window identity.
+
+If a live browser instance is already present for the current resolved root, startup short-circuits and opens the preserved localhost URL in the default browser instead of starting a second server.
+
+If a live webview instance is already present for the current resolved root, startup short-circuits and calls the platform focus adapter. Windows should use a stored window handle when available, with PID-based top-level window discovery as fallback. Platforms without a reliable focus mechanism may exit quietly after detecting the existing instance.
 
 ### 10. Display Shells and Headless Mode
 
@@ -216,6 +222,7 @@ Browser responsibilities:
 Webview responsibilities:
 
 - open a native WebView window,
+- record platform window identity when available,
 - own process lifetime through the window lifecycle.
 
 Headless responsibilities inside runtime orchestration:
@@ -238,6 +245,8 @@ Responsibilities:
 - expose Node-inspired text, binary, and stream helpers,
 - expose tracked text file helpers for two-way file-backed state,
 - wrap filesystem, script, shell, and app-info calls,
+- expose low-level runtime broadcast helpers,
+- expose an opt-in multi-tab coordination helper built on broadcast,
 - hide request IDs and stream/session mechanics from normal app code,
 - stay thin enough that direct protocol access remains possible.
 
@@ -254,6 +263,8 @@ Both consumption lanes are first-class:
 
 - direct source consumption from `luminka/sdk/luminka.ts`,
 - generated artifact consumption from `sdk/dist/*`.
+
+The multi-tab helper owns session IDs, peer heartbeats, peer join/leave detection, arbitrary peer messages, and primary election. By default, the oldest active session is primary and newer active sessions are non-primary. The helper does not enforce UI or data policy. Apps decide whether secondary tabs become read-only, block, warn, reload, or continue.
 
 ### 12. Packaging Hooks
 
@@ -367,6 +378,31 @@ frontend creates tracked text file helper
 
 This flow is the recommended path for local-first apps that bind UI state to a text file. Raw watch APIs remain available for callers that need every filesystem event.
 
+### Runtime Broadcast Flow
+
+```text
+frontend client A sends broadcast(channel, data, optional payload)
+  -> runtime validates the broadcast envelope
+  -> runtime snapshots active WebSocket connections for the same process/root
+  -> runtime pushes the broadcast to matching connected clients, normally excluding sender
+  -> frontend clients decide what the message means
+```
+
+Broadcast messages are transient. The runtime does not persist them, replay them, or treat them as authoritative state.
+
+### Multi-Tab Coordination Flow
+
+```text
+browser tab creates multi-tab coordinator
+  -> coordinator generates a session ID
+  -> coordinator announces presence through runtime broadcast
+  -> coordinators exchange heartbeats and peer metadata
+  -> oldest active session is identified as primary by default
+  -> app receives primary/peer events and chooses its own UI/data policy
+```
+
+This flow helps browser-mode apps handle stale tabs and duplicate windows without forcing Luminka to own application state or file merge semantics.
+
 ### Streaming Process Flow
 
 ```text
@@ -404,12 +440,14 @@ Key internal relationships:
 | Embedded frontend | App UI assets are embedded into the executable for normal operation. |
 | Localhost-only runtime | Runtime interfaces are exposed only on loopback. |
 | Single instance per resolved root | The same resolved app root must not create competing live instances. |
+| Best-effort webview focus | Relaunching a webview instance should foreground the existing native window when platform support exists. |
 | Portable-first locality | Portable mode remains the default locality model unless overridden. |
 | App-agnostic runtime | Luminka does not interpret application file schemas. |
 | Strict capability separation | FS, script, and shell lanes stay distinct. No silent fallback. |
 | Stream-first payload model | Payload-bearing operations use the shared stream transport model. |
 | Capability truthfulness | Reported capabilities must match actual behavior. |
 | Thin SDK | SDK improves DX without replacing the canonical protocol. |
+| Broadcast is not state | Runtime broadcast messages are transient coordination events, not persisted application state. |
 
 ## Configuration / Operations
 
@@ -448,6 +486,7 @@ Operational expectations:
 - headless launches should die with the foreground process,
 - stale locks should be recoverable,
 - failures to open a shell or bind a port should fail fast and clearly,
+- relaunching an existing webview instance should attempt platform-native focus and then exit,
 - large payloads should flow through chunked streams rather than one-shot buffers.
 
 ## Design Decisions
@@ -463,6 +502,9 @@ Operational expectations:
 | Shared stream model for files and process output | Avoids separate transport designs for similar payload problems | High |
 | Canonical cross-platform icon pipeline | Converges packaging behavior across Windows, macOS, and Linux | Medium |
 | Strict script vs shell separation | Keeps capability semantics honest and predictable | High |
+| Structured instance records | Allows instance state to grow with mode and platform window identity without tuple parsing constraints | High |
+| Broadcast as primitive, not state store | Solves browser multi-tab coordination without making Luminka own app state | High |
+| Oldest active tab as default primary | Gives SDK multi-tab coordination a stable default while leaving policy to applications | Medium |
 
 ## Implementation Pointers
 

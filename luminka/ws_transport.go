@@ -56,7 +56,7 @@ func writeErrorResponse(conn *wsConnection, id json.RawMessage, message string) 
 func writeFSResponse(conn *wsConnection, id json.RawMessage, ok bool, errMsg string, data *string, files []string, exists *bool) error {
 	response := wsMessage{Event: "fs_response", ID: id, Ok: boolPtr(ok), Error: errMsg, Files: files, Exists: exists}
 	if data != nil {
-		response.Data = *data
+		response.Data = rawStringData(*data)
 	}
 	return writeWSMessage(conn, response)
 }
