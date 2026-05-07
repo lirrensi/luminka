@@ -28,6 +28,10 @@ func TestParseLaunchOptions(t *testing.T) {
 		{name: "root path", args: []string{"--root", "notes"}, want: launchOptions{Root: "notes"}},
 		{name: "conflicting flags", args: []string{"--portable", "--detached"}, wantErr: "conflicting root policy overrides"},
 		{name: "unknown root policy", args: []string{"--root-policy", "invalid"}, wantErr: "unknown root policy"},
+		{name: "port", args: []string{"--port", "8080"}, want: launchOptions{Port: 8080}},
+		{name: "port with other flags", args: []string{"--headless", "--port", "9999"}, want: launchOptions{Headless: true, Port: 9999}},
+		{name: "port non-numeric", args: []string{"--port", "abc"}, wantErr: "--port requires a numeric value"},
+		{name: "port missing value", args: []string{"--port"}, wantErr: "--port requires a value"},
 	}
 
 	for _, tc := range tests {

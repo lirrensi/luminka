@@ -245,6 +245,7 @@ func prepareRuntime(cfg Config) (*Runtime, *lockState, error) {
 		WindowDebug:     cfg.WindowDebug,
 		Assets:          cfg.Assets,
 		ScriptAssets:    cfg.ScriptAssets,
+		Port:            cfg.Port,
 		LockPath:        state.path,
 		PID:             state.record.PID,
 		ownedLock:       state.owned,
@@ -275,6 +276,9 @@ func applyLaunchOverrides(cfg Config, opts launchOptions) Config {
 	}
 	if opts.RootPolicy != "" {
 		cfg.RootPolicy = opts.RootPolicy
+	}
+	if opts.Port != 0 {
+		cfg.Port = opts.Port
 	}
 	cfg.Headless = cfg.Headless || opts.Headless
 	return cfg

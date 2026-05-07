@@ -465,6 +465,7 @@ The runtime configuration layer is expected to cover at least:
 - script capability enable/disable,
 - shell capability enable/disable,
 - execution timeout,
+- port (fixed localhost port; 0 = OS-assigned),
 - stream and chunk sizing defaults.
 
 ### Build Profiles

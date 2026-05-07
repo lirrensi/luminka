@@ -624,6 +624,7 @@ A Luminka app configuration MUST include conceptually equivalent fields to the f
 | `scripts_enabled` | Exposed script capability | false |
 | `shell_enabled` | Exposed shell capability | false |
 | `exec_timeout` | Default process execution timeout | 30s |
+| `port` | Fixed localhost port; 0 = OS-assigned | 0 |
 
 The exact configuration surface MAY differ by implementation language.
 

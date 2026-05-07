@@ -8,6 +8,7 @@ package luminka
 
 import (
 	"fmt"
+	"strconv"
 )
 
 type RootPolicy string
@@ -22,6 +23,7 @@ type launchOptions struct {
 	RootPolicy RootPolicy
 	Headless   bool
 	Version    bool
+	Port       int
 }
 
 func parseLaunchOptions(args []string) (launchOptions, error) {
@@ -56,6 +58,17 @@ func parseLaunchOptions(args []string) (launchOptions, error) {
 			if err := mergeLaunchPolicy(&opts, RootPolicyDetached); err != nil {
 				return launchOptions{}, err
 			}
+		case "--port":
+			value, next, err := launchFlagValue(args, i, "--port")
+			if err != nil {
+				return launchOptions{}, err
+			}
+			port, err := strconv.Atoi(value)
+			if err != nil {
+				return launchOptions{}, fmt.Errorf("--port requires a numeric value")
+			}
+			opts.Port = port
+			i = next
 		case "--headless":
 			opts.Headless = true
 		case "--version", "-version", "version":
@@ -77,7 +90,7 @@ func launchFlagValue(args []string, index int, flag string) (string, int, error)
 
 func isLaunchFlag(arg string) bool {
 	switch arg {
-	case "--root", "--root-policy", "--portable", "--detached", "--headless", "--version", "-version", "version":
+	case "--root", "--root-policy", "--port", "--portable", "--detached", "--headless", "--version", "-version", "version":
 		return true
 	default:
 		return false

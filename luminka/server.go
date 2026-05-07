@@ -24,6 +24,9 @@ func startServer(rt *Runtime) error {
 	if rt.Assets == nil {
 		return errors.New("embedded assets are required")
 	}
+	if rt.Port != 0 && (rt.Port < 1 || rt.Port > 65535) {
+		return fmt.Errorf("port %d is outside valid range 1-65535", rt.Port)
+	}
 
 	assetHandler, err := buildAssetHandler(rt.Assets)
 	if err != nil {
