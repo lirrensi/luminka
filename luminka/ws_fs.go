@@ -36,6 +36,7 @@ func (rt *Runtime) handleFilesystemRequest(conn *wsConnection, request wsMessage
 		if err := rt.FSBridge.WriteBytes(request.Path, []byte(request.dataString())); err != nil {
 			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
 		}
+		rt.logEvent("fs_write", map[string]any{"path": request.Path})
 		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
 	case "fs_list":
 		files, err := rt.FSBridge.List(request.Path)
@@ -47,6 +48,7 @@ func (rt *Runtime) handleFilesystemRequest(conn *wsConnection, request wsMessage
 		if err := rt.FSBridge.Delete(request.Path); err != nil {
 			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
 		}
+		rt.logEvent("fs_delete", map[string]any{"path": request.Path})
 		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
 	case "fs_exists":
 		exists, err := rt.FSBridge.Exists(request.Path)

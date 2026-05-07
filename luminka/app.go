@@ -45,6 +45,7 @@ type Config struct {
 	EnableScripts   bool
 	EnableShell     bool
 	ExecTimeout     time.Duration
+	Logs            bool
 	Root            string
 	Assets          fs.FS
 	ScriptAssets    fs.FS
@@ -70,6 +71,7 @@ type Runtime struct {
 	WindowHeight    int
 	WindowResizable bool
 	WindowDebug     bool
+	Logs            bool
 	Capabilities    capabilityState
 	FSBridge        *FSBridge
 	Watcher         *Watcher
@@ -147,6 +149,11 @@ func Run(cfg Config) (err error) {
 	if err = startServer(rt); err != nil {
 		return err
 	}
+	rt.logEvent("startup", map[string]any{
+		"port": rt.Port,
+		"mode": rt.Mode,
+		"root": rt.Root,
+	})
 	if err = writeInstanceRecord(rt.LockPath, instanceRecord{PID: rt.PID, Port: rt.Port, Mode: rt.Mode}); err != nil {
 		return err
 	}
@@ -243,6 +250,7 @@ func prepareRuntime(cfg Config) (*Runtime, *lockState, error) {
 		WindowHeight:    cfg.WindowHeight,
 		WindowResizable: cfg.WindowResizable,
 		WindowDebug:     cfg.WindowDebug,
+		Logs:            cfg.Logs,
 		Assets:          cfg.Assets,
 		ScriptAssets:    cfg.ScriptAssets,
 		Port:            cfg.Port,
@@ -281,6 +289,7 @@ func applyLaunchOverrides(cfg Config, opts launchOptions) Config {
 		cfg.Port = opts.Port
 	}
 	cfg.Headless = cfg.Headless || opts.Headless
+	cfg.Logs = cfg.Logs || opts.Logs
 	return cfg
 }
 
@@ -331,6 +340,8 @@ func (rt *Runtime) cleanup() error {
 	if rt == nil {
 		return nil
 	}
+
+	rt.logEvent("shutdown", nil)
 
 	rt.stopIdleTimer()
 	if rt.Watcher != nil {

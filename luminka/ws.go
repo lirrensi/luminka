@@ -221,6 +221,7 @@ func (rt *Runtime) handleWebSocketSession(wsConn *wsConnection) {
 		case "shell_exec_stream":
 			_ = rt.handleShellStreamRequest(wsConn, request)
 		default:
+			rt.logEvent("error", map[string]any{"message": fmt.Sprintf("unknown event %q", request.Event)})
 			_ = writeErrorResponse(wsConn, request.ID, fmt.Sprintf("unknown event %q", request.Event))
 		}
 	}
@@ -279,6 +280,9 @@ func (rt *Runtime) registerConnection(conn websocketConn) *wsConnection {
 		rt.idleTimer.Stop()
 		rt.idleTimer = nil
 	}
+	rt.logEvent("ws_connect", map[string]any{
+		"connections": len(rt.connections),
+	})
 	return wsConn
 }
 
@@ -293,6 +297,9 @@ func (rt *Runtime) unregisterConnection(conn *wsConnection) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	delete(rt.connections, conn)
+	rt.logEvent("ws_disconnect", map[string]any{
+		"connections": len(rt.connections),
+	})
 	if len(rt.connections) == 0 {
 		if rt.idleTimer != nil {
 			rt.idleTimer.Stop()
@@ -363,6 +370,17 @@ func (rt *Runtime) handleScriptRequest(conn *wsConnection, request wsMessage) er
 		return writeExecResponse(conn, "script_response", request.ID, false, "script bridge is unavailable", "", "", nil)
 	}
 	stdout, stderr, code, err := rt.ScriptBridge.Exec(request.Runner, request.File, request.Args, requestTimeout(request.Timeout))
+	ok := err == nil
+	exitCode := code
+	if !ok && exitCode == 0 {
+		exitCode = -1
+	}
+	rt.logEvent("script_exec", map[string]any{
+		"runner":    request.Runner,
+		"file":      request.File,
+		"ok":        ok,
+		"exit_code": exitCode,
+	})
 	if err != nil {
 		return writeExecResponse(conn, "script_response", request.ID, false, err.Error(), stdout, stderr, intPtr(code))
 	}
@@ -380,6 +398,16 @@ func (rt *Runtime) handleShellRequest(conn *wsConnection, request wsMessage) err
 		return writeExecResponse(conn, "shell_response", request.ID, false, "shell bridge is unavailable", "", "", nil)
 	}
 	stdout, stderr, code, err := rt.ShellBridge.Exec(request.Cmd, request.Args, requestTimeout(request.Timeout))
+	ok := err == nil
+	exitCode := code
+	if !ok && exitCode == 0 {
+		exitCode = -1
+	}
+	rt.logEvent("shell_exec", map[string]any{
+		"cmd":       request.Cmd,
+		"ok":        ok,
+		"exit_code": exitCode,
+	})
 	if err != nil {
 		return writeExecResponse(conn, "shell_response", request.ID, false, err.Error(), stdout, stderr, intPtr(code))
 	}
@@ -387,6 +415,7 @@ func (rt *Runtime) handleShellRequest(conn *wsConnection, request wsMessage) err
 }
 
 func (rt *Runtime) pushFSChanged(path string) error {
+	rt.logEvent("fs_changed", map[string]any{"path": path})
 	return pushWSMessage(rt, wsMessage{Event: "fs_changed", Path: path})
 }
 

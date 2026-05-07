@@ -24,6 +24,7 @@ type launchOptions struct {
 	Headless   bool
 	Version    bool
 	Port       int
+	Logs       bool
 }
 
 func parseLaunchOptions(args []string) (launchOptions, error) {
@@ -71,6 +72,8 @@ func parseLaunchOptions(args []string) (launchOptions, error) {
 			i = next
 		case "--headless":
 			opts.Headless = true
+		case "--logs":
+			opts.Logs = true
 		case "--version", "-version", "version":
 			opts.Version = true
 		}
@@ -90,7 +93,7 @@ func launchFlagValue(args []string, index int, flag string) (string, int, error)
 
 func isLaunchFlag(arg string) bool {
 	switch arg {
-	case "--root", "--root-policy", "--port", "--portable", "--detached", "--headless", "--version", "-version", "version":
+	case "--root", "--root-policy", "--port", "--portable", "--detached", "--headless", "--logs", "--version", "-version", "version":
 		return true
 	default:
 		return false

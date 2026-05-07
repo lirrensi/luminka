@@ -130,6 +130,8 @@ Use this when you want the local server and capability bridge without opening br
 
 Use this when you want one installed binary serving the current directory without opening UI.
 
+For more patterns (file watching, binary bundling, multi-tab coordination), see [recipes.md](recipes.md).
+
 ## 5. Understand the two build axes
 
 There are two different choices in Luminka.
@@ -226,6 +228,8 @@ Edit:
 
 Those are the embedded frontend assets for the starter app right now.
 
+Once your app grows beyond basic CRUD, see [recipes.md](recipes.md) for practical patterns like file watching, script execution, and multi-tab coordination.
+
 ## 8. Where the examples differ
 
 ### `starter/`
@@ -280,6 +284,7 @@ const client = new LuminkaClient({
 - `readText()` / `writeText()` are the primary text helpers; `read()` / `write()` remain aliases
 - `readBytes()` / `writeBytes()` handle raw file bytes
 - `createReadStream()` / `createWriteStream()` and `runScriptStream()` / `runShellStream()` expose byte streams
+- `log()` appends a timestamped message to `luminka.log` for debug logging
 
 ### Capability failures
 

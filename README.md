@@ -6,7 +6,7 @@
 
 Luminka is a tiny Go runtime for turning a built web app into a portable `.exe`.
 
-Current release: **v3.0.0** — adds local broadcast coordination for multi-tab browser apps plus single-instance/webview quality-of-life polish, without changing the normal SDK adoption path.
+Current release: **v3.1.0** — adds local broadcast coordination for multi-tab browser apps plus single-instance/webview quality-of-life polish, without changing the normal SDK adoption path.
 
 It gives you a simple way to ship a web app like a desktop app, without Electron, Tauri, or a heavier framework shell.
 
@@ -429,6 +429,7 @@ If you are onboarding a new developer, have them prove the browser build first.
 ## More docs
 
 - [`docs/onboarding.md`](docs/onboarding.md) — practical setup and first edits
+- [`docs/recipes.md`](docs/recipes.md) — practical how-to patterns
 - [`docs/sdk.md`](docs/sdk.md) — TypeScript SDK guide for frontend apps
 - [`docs/product.md`](docs/product.md) — product overview
 - [`docs/spec.md`](docs/spec.md) — behavior and protocol spec

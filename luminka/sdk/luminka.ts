@@ -391,6 +391,13 @@ export class LuminkaClient {
     return new LuminkaMultiTabCoordinator(this, channel, options);
   }
 
+  async log(message: string): Promise<void> {
+    const existing = await this.readText("luminka.log").catch(() => "");
+    const timestamp = new Date().toISOString();
+    const line = `[${timestamp}] ${message}\n`;
+    await this.writeText("luminka.log", existing + line);
+  }
+
   async runScript(runner: string, file: string, args: string[] = [], timeout?: number): Promise<{ stdout: string; stderr: string; code: number | null }> {
     const response = await this.request({ event: "script_exec", runner, file, args, timeout });
     return this.requireExecResult(response);
