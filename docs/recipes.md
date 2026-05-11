@@ -218,13 +218,13 @@ updateUI();
 You want to build your app so it opens in the default browser.
 
 ```bash
-go build ./starter
+go run ./cmd/build ./starter
 ```
 
-Or on Windows:
+Or with pnpm:
 
 ```bash
-starter\build.bat
+pnpm run build
 ```
 
 ### Build a webview-mode app
@@ -232,16 +232,32 @@ starter\build.bat
 You want to build your app with a native desktop window.
 
 ```bash
-go build -tags webview ./starter
+go run ./cmd/build ./starter --webview
 ```
 
-Or on Windows:
+Or with pnpm:
 
 ```bash
-starter\build_webview.bat
+pnpm run build:webview
+```
+
+If your GCC is in a non-standard location, pass it directly:
+
+```bash
+go run ./cmd/build ./starter --webview --gcc C:\msys64\mingw64\bin\gcc.exe
 ```
 
 Requires CGO enabled and native webview dependencies. See [`onboarding.md`](onboarding.md) for prerequisites.
+
+### Build an imported module
+
+When you import Luminka as a Go module (not cloned), use the remote path:
+
+```bash
+go run github.com/lirrensi/luminka/cmd/build@latest . --webview
+```
+
+Same command, works whether you cloned the repo or imported it.
 
 ### Package your app for distribution
 

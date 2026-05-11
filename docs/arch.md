@@ -268,16 +268,25 @@ The multi-tab helper owns session IDs, peer heartbeats, peer join/leave detectio
 
 ### 12. Packaging Hooks
 
-Build tooling is expected to support platform packaging resources, especially app icons.
+Build tooling is provided by a single Go CLI at `cmd/build/main.go` that ships inside the module. It handles tool resolution, icon generation, go-winres embedding, and Go compilation — identical whether used in-repo or imported remotely.
+
+Both consumption paths use the same command:
+
+```bash
+# Cloned repo:
+go run ./cmd/build ./starter --webview
+
+# Imported module:
+go run github.com/lirrensi/luminka/cmd/build@latest . --webview
+```
 
 Canonical direction:
 
-- keep a single source icon asset or source icon set under repository control,
-- generate the platform-specific packaging outputs from that source,
-- support Windows, macOS, and Linux packaging targets through adapters,
-- keep this as build architecture, not runtime architecture.
-
-The exact toolchain MAY differ by platform, but the repo should converge on one canonical icon pipeline rather than ad hoc per-app scripts.
+- keep a single source icon asset under repository control (e.g., `assets/lumi.png`),
+- the build CLI (`go run ./cmd/build`) generates platform-specific packaging outputs from that source,
+- it supports Windows, macOS, and Linux packaging targets,
+- on Windows, it exhaustively scans for GCC across MSYS2, MinGW-w64, TDM-GCC, Chocolatey, Scoop, and Cygwin installations, with `--gcc` for manual override,
+- the build CLI is standalone — no dependency on the Luminka runtime package, no Node.js required for Go builds.
 
 ## Data Models / Storage
 

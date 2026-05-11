@@ -22,12 +22,12 @@ The public Go module path for the repo is `github.com/lirrensi/luminka`.
 ### Core prerequisites
 
 - Go 1.22+
-- Node.js + npm
+- Node.js + pnpm
 
 Then from repo root:
 
 ```bash
-npm install
+pnpm install
 ```
 
 That installs the local JS tooling used by this repo, including `tsx` and `typescript`.
@@ -37,7 +37,7 @@ That installs the local JS tooling used by this repo, including `tsx` and `types
 Start with the **starter app in browser mode**.
 
 ```bash
-npm run build:starter
+pnpm run build
 ```
 
 That gives you a browser-mode starter `.exe` at repo root.
@@ -55,7 +55,7 @@ If you want a specific starter outcome, use one of these.
 ### Browser starter build at repo root
 
 ```bash
-npm run build:starter
+pnpm run build
 ```
 
 Result:
@@ -63,12 +63,12 @@ Result:
 - builds `luminka-starter.exe` at repo root
 - browser mode
 - Windows GUI build path
-- includes SDK regeneration, icon generation, and Windows resource generation
+- includes icon generation, Windows resource generation, and Go compilation
 
 ### Webview starter build at repo root
 
 ```bash
-npm run build:starter:webview
+pnpm run build:webview
 ```
 
 Result:
@@ -76,11 +76,28 @@ Result:
 - builds `luminka-starter-webview.exe` at repo root
 - webview mode
 - Windows GUI build path
+- automatically resolves GCC on Windows, or use `--gcc <path>` to override
+
+### Build other targets
+
+```bash
+pnpm run build:hello     # examples/hello
+pnpm run build:kanban    # examples/kanban
+```
+
+### Use the build CLI directly
+
+```bash
+go run ./cmd/build ./starter
+go run ./cmd/build ./starter --webview
+go run ./cmd/build . --webview --gcc C:\msys64\mingw64\bin\gcc.exe
+go run ./cmd/build ./starter --tags scripts,shell
+```
 
 ### Rebuild the SDK only
 
 ```bash
-npm run build:sdk
+pnpm run build:sdk
 ```
 
 Use this when you changed `luminka/sdk/luminka.ts` and want fresh generated outputs in `sdk/dist/`, `starter/`, and the examples.
@@ -88,7 +105,7 @@ Use this when you changed `luminka/sdk/luminka.ts` and want fresh generated outp
 ### Rebuild icons only
 
 ```bash
-npm run build:icons
+pnpm run build:icons
 ```
 
 Use this when you changed the starter icon source asset and want fresh Windows, macOS, and Linux icon outputs.
@@ -105,6 +122,7 @@ Important on Windows:
 
 - this is **not** the canonical no-console starter build
 - it produces a foreground console build unless you supply the GUI subsystem flag yourself
+- the build CLI (`go run ./cmd/build`) handles this automatically
 
 ### Run the starter in detached mode
 
@@ -301,7 +319,7 @@ Practical pattern:
 If you edit `luminka/sdk/luminka.ts`, run:
 
 ```bash
-npm run build:sdk
+pnpm run build:sdk
 ```
 
 That updates the generated `luminka.js` artifact and the embedded copies used by:
@@ -317,10 +335,10 @@ If you forget this step, the runtime may embed stale frontend SDK code.
 
 Webview is the most likely onboarding pain point.
 
-If `go build ./starter` works but `go build -tags webview ./starter` does not, think in this order:
+If `go build ./starter` works but `go run ./cmd/build ./starter --webview` fails with GCC errors, think in this order:
 
 1. Is CGO enabled?
-2. Is a native compiler toolchain installed?
+2. Is GCC installed? On Windows, the build CLI scans 20+ locations — but if yours isn't found, use `--gcc <path>`.
 3. Are platform webview dependencies present?
 4. On Windows, is WebView2 available?
 
@@ -328,24 +346,24 @@ Do not debug all of Luminka first. Prove the browser build, then isolate the web
 
 ## 12. Suggested first-hour flow for a new developer
 
-1. `npm install`
-2. `npm run build:starter`
+1. `pnpm install`
+2. `pnpm run build`
 3. run the starter app
 4. edit `starter/main.go` to rename the app
 5. edit `starter/dist/app.js` or `starter/dist/index.html`
 6. rebuild and rerun
-7. only then try `npm run build:starter:webview`
+7. only then try `pnpm run build:webview`
 
 If you prefer the longer explicit path instead of the recipe script:
 
-1. `npm run build:sdk`
-2. `npm run build:icons` if you want the starter icon outputs and Windows resource files
-3. `starter\build.bat`
+1. `pnpm run build:sdk`
+2. `pnpm run build:icons` if you want the starter icon outputs and Windows resource files
+3. `go run ./cmd/build ./starter` (or `pnpm run build`)
 4. run the starter app
 5. edit `starter/main.go` to rename the app
 6. edit `starter/dist/app.js` or `starter/dist/index.html`
 7. rebuild and rerun
-8. only then try `npm run build:starter:webview`
+8. only then try `pnpm run build:webview`
 
 ## 13. Canon docs if you need deeper truth
 

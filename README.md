@@ -36,7 +36,7 @@ The flow is simple:
 4. Compile the Go app.
 5. Run the resulting `.exe` anywhere you want.
 
-If you import Luminka directly, rebuild the SDK outputs with `pnpm build:sdk` so the TypeScript source, generated browser artifact, and embedded copies stay in sync.
+If you import Luminka directly, rebuild the SDK outputs with `pnpm run build:sdk` so the TypeScript source, generated browser artifact, and embedded copies stay in sync.
 
 If you want runtime access to the filesystem, bundled scripts, or shell commands, use the Luminka SDK to talk to the host and enable the capabilities you need.
 
@@ -119,7 +119,7 @@ In that flow:
 
 The public Go module path is `github.com/lirrensi/luminka`. The runtime package stays under `luminka/`, so the direct Go import path is `github.com/lirrensi/luminka/luminka`.
 
-The SDK source of truth is [`luminka/sdk/luminka.ts`](luminka/sdk/luminka.ts), and `pnpm build:sdk` regenerates both the stable external artifact at `sdk/dist/luminka.js` and the embedded browser-ready copies.
+The SDK source of truth is [`luminka/sdk/luminka.ts`](luminka/sdk/luminka.ts), and `pnpm run build:sdk` regenerates both the stable external artifact at `sdk/dist/luminka.js` and the embedded browser-ready copies.
 
 ## Which app should I open?
 
@@ -157,7 +157,7 @@ pnpm install
 ### 2) Rebuild the in-repo SDK outputs
 
 ```bash
-pnpm build:sdk
+pnpm run build:sdk
 ```
 
 This transpiles `luminka/sdk/luminka.ts` and writes generated `luminka.js` outputs into:
@@ -172,7 +172,25 @@ Use `luminka/sdk/luminka.ts` when you want direct TypeScript source consumption,
 ### 3) Build the starter app
 
 ```bash
-starter\build.bat
+pnpm run build
+```
+
+This runs `go run ./cmd/build ./starter` which handles icon generation, Windows resource embedding, and the Go compilation in one step.
+
+You can also build other targets:
+
+```bash
+pnpm run build:webview   # starter with native webview window
+pnpm run build:hello     # hello example
+pnpm run build:kanban    # kanban example
+```
+
+Or use the CLI directly:
+
+```bash
+go run ./cmd/build ./starter
+go run ./cmd/build ./starter --webview
+go run ./cmd/build ./examples/hello
 ```
 
 ### 4) Run it
@@ -180,6 +198,16 @@ starter\build.bat
 Run the produced binary from the repo root or your output location.
 
 By default, `starter/` builds in **browser mode**.
+
+### Building without cloning
+
+If you import Luminka as a Go module in your own project, you don't need to clone this repo at all. The build CLI ships inside the module:
+
+```bash
+go run github.com/lirrensi/luminka/cmd/build@latest . --webview
+```
+
+Same CLI, same flags (`--webview`, `--gcc`, `--tags`, `--icon`, `--out`), same behavior. The Go module **is** the build tool.
 
 ## Build modes and tags
 
@@ -204,12 +232,20 @@ go build ./starter
 go build -tags webview ./starter
 ```
 
-On Windows, plain `go build ./starter` is still the generic Go build path, but it produces a console build unless you add `-ldflags "-H windowsgui"` or use the helper script.
+On Windows, plain `go build ./starter` is still the generic Go build path, but it produces a console build unless you add `-ldflags "-H windowsgui"`. The build CLI handles this automatically.
 
-The Windows helper scripts reflect that split and are the canonical starter entrypoints because they regenerate the SDK, build icons, generate resources, and include the GUI subsystem flag:
+The build CLI (`cmd/build/`) is the canonical entry point and ships inside the module itself:
 
-- `build.bat` -> browser build
-- `build_webview.bat` -> webview build
+```bash
+# In-repo (cloned):
+go run ./cmd/build ./starter
+go run ./cmd/build ./starter --webview
+
+# Imported module:
+go run github.com/lirrensi/luminka/cmd/build@latest . --webview
+```
+
+Both paths use the same command. The build tool validates your `dist/`, generates icons from a source PNG, embeds Windows resources, and compiles with the correct flags — on any platform.
 
 ### Capability support
 
@@ -275,7 +311,7 @@ If you are turning `starter/` into your app, these are the first places to edit:
 | Frontend styles | `starter/dist/style.css` |
 | SDK source of truth | `luminka/sdk/luminka.ts` |
 | Generated SDK artifact | `sdk/dist/luminka.js` |
-| Regenerate embedded SDK copies | `pnpm build:sdk` |
+| Regenerate embedded SDK copies | `pnpm run build:sdk` |
 
 ## SDK behavior you should know early
 
@@ -400,18 +436,26 @@ On Windows, duplicate launches of a webview build now try to focus the already-r
 
 ```bash
 pnpm install
-pnpm build:sdk
-go build ./starter
-go build ./examples/hello
-go build ./examples/kanban
-go build -tags webview ./starter
-go build -tags scripts ./starter
-go build -tags shell ./starter
+pnpm run build:sdk            # regenerate SDK outputs
+pnpm run build                # starter (browser)
+pnpm run build:webview        # starter (webview)
+pnpm run build:hello          # hello example
+pnpm run build:kanban         # kanban example
+
+# Remote build (import as Go module — no clone needed):
+go run github.com/lirrensi/luminka/cmd/build@latest . --webview
 ```
 
-Windows helpers live in each app folder as `build.bat` and `build_webview.bat`.
+The build CLI also accepts extra flags:
 
-Starter Windows builds now run the SDK build, icon build, `go-winres make`, and `go build` in that order.
+```bash
+go run ./cmd/build ./starter --webview
+go run ./cmd/build ./starter --webview --gcc C:\msys64\mingw64\bin\gcc.exe
+go run ./cmd/build ./starter --tags scripts,shell
+go run ./cmd/build ./starter --icon assets/lumi.png --out myapp.exe
+```
+
+If Go is not on your PATH, the build CLI searches exhaustively. For webview builds on Windows, it scans 20+ known GCC install locations — or you can pass `--gcc` to point directly at your compiler.
 
 ## Webview friction notes
 
@@ -419,8 +463,8 @@ Webview builds are usually the highest-friction path.
 
 If a browser build works but a webview build or launch fails, check:
 
-- CGO is enabled
-- your native compiler toolchain is installed
+- CGO is enabled (the build CLI sets `CGO_ENABLED=1` automatically)
+- GCC is installed and findable — on Windows, pass `--gcc <path>` if your compiler is in a non-standard location
 - platform webview dependencies are present
 - on Windows, WebView2 is available
 

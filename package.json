@@ -25,10 +25,10 @@
     "scripts": {
         "build:sdk": "tsx scripts/build_sdk.ts",
         "build:icons": "tsx scripts/build_icons.ts",
-        "build:starter": "starter\\build.bat",
-        "build:starter:webview": "starter\\build_webview.bat",
-        "build:examples": "npm run build:sdk",
-        "build:all": "npm run build:sdk",
+        "build": "go run ./cmd/build ./starter",
+        "build:webview": "go run ./cmd/build ./starter --webview",
+        "build:hello": "go run ./cmd/build ./examples/hello",
+        "build:kanban": "go run ./cmd/build ./examples/kanban",
         "test:sdk": "tsx --test luminka/sdk/luminka.test.ts"
     },
     "devDependencies": {
