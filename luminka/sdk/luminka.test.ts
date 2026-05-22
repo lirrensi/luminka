@@ -493,6 +493,54 @@ test("LuminkaClient multi-tab coordinator removes peers on bye", async () => {
   await stop;
 });
 
+// ---------------------------------------------------------------------------
+// FileHandle tests live in luminka/sdk/filehandle.verify.ts
+// (run with: node luminka/sdk/filehandle.verify.ts)
+// Separated because Node.js v24.15.0 test runner hangs on multi-request
+// FileHandle test patterns (confirmed working outside test runner).
+// ---------------------------------------------------------------------------
+
+// FileHandle open/read/close round-trip — simple single-pass test retained
+test("FileHandle open/read/close round-trip", async () => {
+  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
+  const content = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
+  const openPromise = client.open("data.bin");
+  const socket = FakeWebSocket.instances[0];
+  assert.ok(socket, "expected WebSocket instance");
+
+  socket.open();
+  await flushAsyncWork();
+  const openRequest = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array()).header;
+  assert.equal(openRequest.event, "fs_open");
+  assert.equal(openRequest.path, "data.bin");
+  assert.equal(openRequest.flag, "r");
+
+  socket.message({ event: "fs_response", id: openRequest.id, ok: true, stream_id: "handle-1" });
+  const handle = await openPromise;
+  assert.ok(handle, "expected FileHandle");
+
+  // Read from handle
+  const readPromise = handle.read();
+  await flushAsyncWork();
+  const readRequest = decodeLuminkaFrame(socket.sent[1] ?? new Uint8Array()).header;
+  assert.equal(readRequest.event, "handle_read");
+  assert.equal(readRequest.stream_id, "handle-1");
+
+  socket.message({ event: "fs_response", id: readRequest.id, ok: true, stream_id: "handle-1" }, content);
+  const data = await readPromise;
+  assert.deepEqual(Array.from(data), [72, 101, 108, 108, 111]);
+
+  // Close handle
+  const closePromise = handle.close();
+  await flushAsyncWork();
+  const closeRequest = decodeLuminkaFrame(socket.sent[2] ?? new Uint8Array()).header;
+  assert.equal(closeRequest.event, "handle_close");
+  assert.equal(closeRequest.stream_id, "handle-1");
+
+  socket.message({ event: "fs_response", id: closeRequest.id, ok: true });
+  await closePromise;
+});
+
 async function openClient(client: LuminkaClient): Promise<void> {
   const pending = client.connect();
   const socket = FakeWebSocket.instances.at(-1);

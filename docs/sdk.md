@@ -15,8 +15,6 @@ await client.connect();
 
 The SDK source of truth is [`luminka/sdk/luminka.ts`](../luminka/sdk/luminka.ts). The generated browser artifact lives under [`sdk/dist/`](../sdk/dist/). If you import Luminka directly or consume generated SDK files, rebuild/import the current SDK so TypeScript source, generated browser output, and embedded copies stay aligned.
 
-Version 3 broadcast support is additive. Normal SDK consumers should not need protocol changes by hand; rebuild against the current SDK and keep using the helper APIs.
-
 ## What the SDK Provides
 
 The SDK wraps Luminka's local runtime capabilities:
@@ -24,9 +22,11 @@ The SDK wraps Luminka's local runtime capabilities:
 | Area | SDK surface | Use it for |
 |---|---|---|
 | Connection | `createLuminkaClient()`, `connect()`, `disconnect()`, `appInfo()` | Opening the runtime bridge and reading app/runtime metadata |
-| Files | `readText()`, `writeText()`, `read()`, `write()`, `readBytes()`, `writeBytes()`, `list()`, `remove()`, `exists()` | Local files relative to the app root |
+| Files (canonical API) | `readFile()`, `writeFile()`, `readdir()`, `mkdir()`, `stat()`, `lstat()`, `rm()`, `unlink()`, `rename()`, `copyFile()`, `appendFile()`, `access()`, `chmod()`, `utimes()`, `truncate()`, `symlink()`, `readlink()`, `realpath()`, `link()`, `open()` (FileHandle), `mkdtemp()`, `rmdir()` | Local files relative to the app root — Node `fs/promises`-shaped API |
+| Files (legacy wrappers) | `readText()`, `writeText()`, `read()`, `write()`, `readBytes()`, `writeBytes()`, `list()`, `remove()`, `exists()` | Backward-compatible convenience wrappers for the canonical API |
 | File watching | `watch()`, `unwatch()`, `onFileChanged()` | Raw file-change notifications |
 | File-backed state | `trackedTextFile()` | Friendly text-file state with echo suppression |
+| FileHandle | `open()` returns a `FileHandle` with `read()`, `write()`, `close()`, `stat()`, `truncate()`, `readFile()`, `writeFile()`, `appendFile()`, `chmod()`, `utimes()`, `sync()`, `datasync()` | Open-handle workflows for partial reads/writes |
 | Streams | `createReadStream()`, `createWriteStream()`, `runScriptStream()`, `runShellStream()` | Large files and live process output |
 | Scripts | `runScript()`, `runScriptStream()` | Enabled constrained script execution |
 | Shell | `runShell()`, `runShellStream()` | Enabled full-trust command execution |
@@ -34,6 +34,8 @@ The SDK wraps Luminka's local runtime capabilities:
 | Multi-tab | `createMultiTabCoordinator()` | Primary-tab election, peer events, and tab messages |
 
 All filesystem paths are app-root-relative. The runtime rejects paths that try to escape the app root.
+
+> **Canonical API note**: The Node-style methods (`readFile`, `writeFile`, `readdir`, `mkdir`, etc.) are the primary filesystem contract. The older Luminka-specific wrappers (`readText`, `writeText`, `list`, `remove`, `exists`) are backward-compatible convenience methods that delegate to the canonical API. They may be removed in a future major version.
 
 ## Import and Connection Patterns
 
@@ -107,42 +109,206 @@ Shell is a full-trust lane. Do not expose shell commands to untrusted frontend c
 
 ## File Helpers
 
-### Text files
+Luminka's SDK exposes a **Node `fs/promises`-shaped canonical filesystem API**. All methods return Promises and accept app-root-relative paths.
 
-`readText()` and `writeText()` are the explicit text helpers. `read()` and `write()` are text aliases for the same operations.
+Legacy Luminka-specific wrappers are preserved for backward compatibility but are documented as convenience aliases.
+
+### Canonical read and write
+
+Read and write files with `readFile()` and `writeFile()`, mirroring `fs.promises.readFile` and `fs.promises.writeFile`.
 
 ```ts
-const text = await client.readText("notes/today.md");
-await client.writeText("notes/today.md", text + "\nDone.\n");
+// Read text (UTF-8 assumed)
+const text = await client.readFile("notes/today.md", { encoding: "utf8" });
 
-// Aliases:
-const sameText = await client.read("notes/today.md");
-await client.write("notes/today.md", sameText);
+// Read binary
+const image = await client.readFile("images/logo.png"); // returns Uint8Array
+
+// Write text
+await client.writeFile("notes/today.md", "Hello World\n");
+
+// Write binary
+await client.writeFile("backup/logo.png", imageBytes);
 ```
 
-### Bytes
+When no `encoding` option is given, `readFile()` returns a `Uint8Array`. When `{ encoding: "utf8" }` is given, it returns a decoded string.
 
-Use bytes for binary data or when you do not want text encoding assumptions.
+### Append to a file
 
 ```ts
-const image = await client.readBytes("images/logo.png");
-await client.writeBytes("backup/logo.png", image);
+await client.appendFile("logs/app.log", `[${new Date().toISOString()}] event occurred\n`);
 ```
 
-`readBytes()` collects a read stream into one `Uint8Array`. `writeBytes()` writes in chunks internally.
-
-### List, delete, and exists
+### Directory operations
 
 ```ts
-const files = await client.list("notes");
-const hasConfig = await client.exists("config.json");
+// Create a directory
+await client.mkdir("notes");                // single directory
+await client.mkdir("deep/nested/path", { recursive: true }); // mkdir -p
 
-if (hasConfig) {
-  await client.remove("config.json"); // runtime fs_delete; files only
+// List a directory (returns file names)
+const files = await client.readdir("notes");
+for (const name of files) {
+  console.log(name);
 }
+
+// List with entry types
+const entries = await client.readdir("notes", { withFileTypes: true });
+for (const entry of entries) {
+  console.log(entry.name, entry.isDirectory ? "(dir)" : "(file)");
+}
+
+// Create a temporary directory
+const tmpPath = await client.mkdtemp("myapp-");
+console.log(tmpPath); // e.g. "myapp-AbCdEf"
+
+// Remove an empty directory
+await client.rmdir("empty-dir");
 ```
 
-The SDK method for deletion is `remove(path)`. It maps to Luminka's filesystem delete operation. The runtime rejects directory deletion.
+### File and directory removal
+
+```ts
+// Remove a single file
+await client.unlink("temp.txt");
+
+// Remove a file or directory (recursive when requested)
+await client.rm("node_modules", { recursive: true });
+```
+
+### Rename, move, and copy
+
+```ts
+// Rename or move a file or directory
+await client.rename("old-name.txt", "new-name.txt");
+
+// Copy a single file
+await client.copyFile("source.txt", "backup/source.txt");
+```
+
+### File metadata and inspection
+
+```ts
+// Get file or directory stats
+const stats = await client.stat("config.json");
+console.log(stats.size, stats.mode, stats.modTime, stats.isDirectory);
+
+// Get stats without following symlinks
+const lstatResult = await client.lstat("symlink-to-config");
+
+// Check path accessibility
+await client.access("readable-file");        // succeeds if readable
+await client.access("executable.sh", 0o111); // check execute permission
+
+// Resolve a symlink target
+const target = await client.readlink("shortcut");
+console.log("points to:", target);
+
+// Resolve a canonical path
+const real = await client.realpath("some/relative/../path");
+console.log(real); // absolute path
+```
+
+### Permissions and timestamps
+
+```ts
+// Change file mode (permissions)
+await client.chmod("script.sh", 0o755);
+
+// Change file timestamps
+const now = new Date();
+await client.utimes("data.json", now, now);
+```
+
+### Truncate
+
+```ts
+// Truncate a file to a specific length
+await client.truncate("log.txt", 0);    // empty the file
+await client.truncate("data.bin", 512); // keep first 512 bytes
+```
+
+### Symlinks and links
+
+```ts
+// Create a symbolic link
+await client.symlink("target.txt", "shortcut.txt");
+
+// Create a hard link
+await client.link("original.txt", "duplicate.txt");
+```
+
+### Recursive copy
+
+```ts
+// Copy a single file
+await client.cp("source.txt", "backup/source.txt");
+
+// Copy a directory tree recursively
+await client.cp("project/", "backup/project/", { recursive: true });
+```
+
+### FileHandle (open-based workflows)
+
+For fine-grained read/write access to a single file, use `open()` to get a `FileHandle`.
+
+```ts
+// Open a file for reading and writing
+const handle = await client.open("data.bin", "r+");
+
+// Read at a specific position
+const buf = await handle.read({ length: 100, position: 0 });
+
+// Write at a specific position
+await handle.write(encodedData, 1024);
+
+// Get metadata for the open file
+const info = await handle.stat();
+
+// Truncate to a length
+await handle.truncate(512);
+
+// Read the entire file through the handle
+const allBytes = await handle.readFile();
+
+// Flush data to disk
+await handle.sync();
+await handle.datasync();
+
+// Close the handle
+await handle.close();
+```
+
+The handle also supports streaming and line reading:
+
+```ts
+// Stream content from the handle
+const stream = handle.createReadStream({ start: 0 });
+const reader = stream.getReader();
+// ... consume as with any ReadableStream
+
+// Write stream to the handle
+const writable = handle.createWriteStream();
+const writer = writable.getWriter();
+await writer.write(encodedData);
+await writer.close();
+
+// Read lines lazily
+for await (const line of handle.readLines()) {
+  console.log(line);
+}
+
+// Get the handle as a Web ReadableStream
+const webStream = handle.readableWebStream();
+```
+
+`Flags` use Node-style strings:
+- `"r"` — read-only
+- `"r+"` — read-write (file must exist)
+- `"w"` — write-only (create or truncate)
+- `"w+"` — read-write (create or truncate)
+- `"a"` — append-only (create if missing)
+- `"a+""` — read-append (create if missing)
 
 ### Watch, unwatch, and raw change events
 
@@ -163,6 +329,44 @@ await client.unwatch("workspace.json");
 ```
 
 For UI state bound to a text file, prefer `trackedTextFile()` instead of raw watch events.
+
+## Legacy compatibility wrappers
+
+The following methods are retained for backward compatibility. They delegate to the canonical Node-style API. New code should prefer the canonical methods.
+
+```ts
+// These are equivalent:
+await client.readText("notes/today.md")   // old style
+await client.readFile("notes/today.md", { encoding: "utf8" }) // canonical
+
+// These are equivalent:
+await client.writeText("notes/today.md", "hello") // old style
+await client.writeFile("notes/today.md", "hello") // canonical
+
+// These are equivalent:
+await client.readBytes("images/logo.png")  // old style
+await client.readFile("images/logo.png")   // canonical (returns Uint8Array)
+
+// These are equivalent:
+await client.writeBytes("backup/logo.png", data) // old style
+await client.writeFile("backup/logo.png", data)  // canonical
+
+// These are equivalent:
+const names = await client.list("notes")     // old style
+const names = await client.readdir("notes")  // canonical
+
+// These are equivalent:
+await client.remove("file.txt") // old style (file only)
+await client.unlink("file.txt") // canonical
+
+// These are equivalent:
+const exists = await client.exists("path") // old style
+await client.access("path").then(() => true).catch(() => false) // canonical pattern
+
+// read() and write() are text aliases for readText()/writeText():
+await client.read("path") === await client.readText("path");
+await client.write("path", "data") === await client.writeText("path", "data");
+```
 
 ## `trackedTextFile()`
 

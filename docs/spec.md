@@ -342,19 +342,52 @@ Response header:
 
 ### 11. Filesystem Capability
 
-If filesystem capability is enabled, the runtime MUST support the following events:
+If filesystem capability is enabled, the runtime MUST implement a filesystem API shaped as closely as practical to `node:fs/promises`. The canonical reference is the Node `fs/promises` surface, not Luminka's older ad hoc method set.
+
+The runtime's public filesystem API covers **path-based operations** and **FileHandle operations**. Both are Promise-style (async only). Luminka's transport model is inherently asynchronous — all filesystem operations cross a WebSocket request boundary. Synchronous filesystem APIs (e.g. `readFileSync`, `writeFileSync`, `statSync`) are therefore excluded from the parity target.
+
+#### 11.1 Path-based operations
+
+The runtime MUST support the following path-based operations when filesystem capability is enabled:
 
 | Request event | Response event | Behavior |
 |---|---|---|
-| `fs_read_text` | `fs_response` | Read a text file |
-| `fs_write_text` | `fs_response` | Write a text file |
-| `fs_list` | `fs_response` | List a directory |
-| `fs_delete` | `fs_response` | Delete a file; directories are rejected |
-| `fs_exists` | `fs_response` | Check path existence |
+| `fs_access` | `fs_response` | Check accessibility of a path |
+| `fs_append_file` | `fs_response` | Append data to a file |
+| `fs_chmod` | `fs_response` | Change permissions of a path |
+| `fs_copy_file` | `fs_response` | Copy a file from src to dest |
+| `fs_link` | `fs_response` | Create a hard link |
+| `fs_lstat` | `fs_response` | Get metadata without following symlinks |
+| `fs_mkdir` | `fs_response` | Create a directory |
+| `fs_mkdtemp` | `fs_response` | Create a temporary directory |
+| `fs_open` | `fs_response` | Open a FileHandle for read/write |
+| `fs_read_file` | `fs_response` | Read a file's contents |
+| `fs_readdir` | `fs_response` | Read directory entries |
+| `fs_readlink` | `fs_response` | Read a symlink's target |
+| `fs_realpath` | `fs_response` | Resolve a path to its canonical absolute path |
+| `fs_rename` | `fs_response` | Rename or move a file or directory |
+| `fs_rm` | `fs_response` | Remove a file or directory (recursive when requested) |
+| `fs_rmdir` | `fs_response` | Remove an empty directory |
+| `fs_stat` | `fs_response` | Get file or directory metadata |
+| `fs_symlink` | `fs_response` | Create a symbolic link |
+| `fs_truncate` | `fs_response` | Truncate or extend a file |
+| `fs_unlink` | `fs_response` | Remove a file (unlink) |
+| `fs_utimes` | `fs_response` | Change file timestamps |
+| `fs_write_file` | `fs_response` | Write data to a file |
 | `fs_watch` | `fs_response` | Register a watched path |
 | `fs_unwatch` | `fs_response` | Remove a watched path |
-| `fs_open_read` | `fs_response` or equivalent | Open a chunked read stream |
-| `fs_open_write` | `fs_response` or equivalent | Open a chunked write stream |
+
+For backward compatibility, the runtime SHOULD also support the following legacy event names, which map to the corresponding Node-style operations:
+
+| Legacy event | Maps to | Notes |
+|---|---|---|
+| `fs_read_text` | `fs_read_file` | Returns decoded string |
+| `fs_write_text` | `fs_write_file` | Accepts string data |
+| `fs_list` | `fs_readdir` | Returns file names only (with `"/"` suffix for directories) |
+| `fs_delete` | `fs_unlink` | Files only; directories rejected |
+| `fs_exists` | `fs_access` | Returns boolean |
+| `fs_open_read` | `fs_open` | Opens read-only stream |
+| `fs_open_write` | `fs_open` | Opens write-only stream |
 
 Paths MUST be interpreted relative to the resolved app root.
 
@@ -366,19 +399,95 @@ The runtime MUST reject:
 
 The runtime MUST NOT impose an application schema on file contents.
 
-`fs_read_text` and `fs_write_text` are convenience operations layered on top of the runtime's byte-capable transport model.
-
 Chunked filesystem transfer MUST be supported from the start. A conforming implementation MUST NOT require that large files fit into one request or one response frame.
 
-Example text read header:
+#### 11.2 Response shapes
 
+All filesystem responses use the response event `fs_response`. A successful response includes `"ok": true`. A failed response includes `"ok": false` and an `"error"` message.
+
+Operation-specific fields in successful responses:
+
+| Operation | Response fields |
+|---|---|
+| `fs_read_file` | `data` (payload bytes or text) |
+| `fs_stat`, `fs_lstat` | `stat` (JSON object with `size`, `mode`, `mod_time`, `is_dir`, `is_symlink`) |
+| `fs_readdir` | `files` (string array of names), `file_types` (parallel array: `"file"`, `"directory"`, `"symlink"`) |
+| `fs_readlink` | `data` (target path string) |
+| `fs_realpath` | `data` (resolved path string) |
+| `fs_mkdtemp` | `data` (created path string) |
+| `fs_open` | `handle_id` (string, reuses the `stream_id` field) |
+| `fs_access` | `ok: true` on success, error on failure |
+| `fs_exists` (legacy) | `exists` (boolean) |
+
+#### 11.3 Example
+
+Request:
 ```json
-{ "event": "fs_read_text", "id": "f1", "path": "data.yaml" }
+{ "event": "fs_read_file", "id": "f1", "path": "data.yaml" }
+```
+
+Success response:
+```json
+{ "event": "fs_response", "id": "f1", "ok": true }
+// followed by payload bytes when the response carries file data
+```
+
+Stat request:
+```json
+{ "event": "fs_stat", "id": "f2", "path": "config.json" }
+```
+
+Stat response:
+```json
+{
+  "event": "fs_response",
+  "id": "f2",
+  "ok": true,
+  "stat": {
+    "size": 1234,
+    "mode": 420,
+    "mod_time": "2026-01-01T00:00:00Z",
+    "is_dir": false,
+    "is_symlink": false
+  }
+}
 ```
 
 If filesystem capability is disabled, any `fs_*` call MUST fail explicitly.
 
-### 12. Filesystem Change Notifications
+### 12. FileHandle Operations
+
+When `fs_open` succeeds, it returns a `handle_id` (in the `stream_id` response field) that identifies an open file handle at the runtime.
+
+The runtime MUST support the following handle operations:
+
+| Request event | Response event | Behavior |
+|---|---|---|
+| `handle_read` | stream chunks | Read from the handle at a position |
+| `handle_write` | stream chunks | Write to the handle at a position |
+| `handle_close` | `fs_response` | Close the handle |
+| `handle_stat` | `fs_response` | Get metadata for the open file |
+| `handle_truncate` | `fs_response` | Truncate the open file |
+| `handle_sync` | `fs_response` | Flush buffered data to disk |
+| `handle_datasync` | `fs_response` | Flush data without metadata |
+
+Each handle operation includes a `handle_id` field (mapped to the `stream_id` wire field) identifying which open handle to act on.
+
+The runtime MUST close the underlying OS file handle when `handle_close` is received.
+
+The runtime SHOULD also clean up any handle whose owning WebSocket connection closes, regardless of whether `handle_close` was explicitly called.
+
+Request fields for `handle_read`:
+- `handle_id` (string): the handle to read from
+- `offset` (number): byte position to read from
+- `length` (number): number of bytes to read (optional; runtime-defined default)
+
+Request fields for `handle_write`:
+- `handle_id` (string): the handle to write to
+- `offset` (number): byte position to write at (optional; append mode if omitted)
+- payload bytes: data to write
+
+### 13. Filesystem Change Notifications
 
 If filesystem capability is enabled and a path is being watched, the runtime MUST notify the frontend when it observes that the path changed.
 
@@ -392,7 +501,9 @@ The implementation MAY use polling or native OS file watching. The observable co
 
 The raw filesystem watch contract is origin-unaware. A runtime notification MAY be caused by a write performed through the same frontend client that registered the watch. The runtime MUST NOT be required to distinguish same-client writes from other local modifications.
 
-### 13. SDK Tracked Text File Helper
+The watching contract SHOULD support both file and directory paths. When a directory is watched, the runtime SHOULD notify for changes to children within that directory, including creation, modification, and deletion of child entries.
+
+### 14. SDK Tracked Text File Helper
 
 A conforming product implementation SHOULD provide a higher-level SDK helper for text files that supports the common local-first pattern of loading a file, saving new text to that file, and subscribing to meaningful external content changes.
 
@@ -416,7 +527,7 @@ When `save` completes successfully, the helper MUST update its current known tex
 
 The helper MAY expose raw watch events separately for advanced callers, but raw events MUST remain distinguishable from meaningful external content-change callbacks.
 
-### 14. Runtime Broadcast Events
+### 15. Runtime Broadcast Events
 
 Luminka MAY support a runtime-local broadcast primitive for connected frontend clients.
 
@@ -457,7 +568,7 @@ Broadcasts MUST be transient. The runtime MUST NOT persist broadcast messages or
 
 The runtime MUST NOT define application-level semantics for broadcast messages. Multi-tab coordination, dirty-state handling, primary-tab behavior, stale-data handling, and merge policy remain frontend or application responsibilities.
 
-### 15. SDK Multi-Tab Coordination Helper
+### 16. SDK Multi-Tab Coordination Helper
 
 A conforming product implementation SHOULD provide an opt-in SDK helper built on top of runtime broadcast events for browser multi-tab coordination.
 
@@ -476,7 +587,7 @@ The default primary election rule SHOULD treat the oldest active session as prim
 
 The helper MUST NOT force secondary tabs to close, become read-only, reload, or block editing. It exposes coordination state; the application decides UI and data policy.
 
-### 16. Script Execution Capability
+### 17. Script Execution Capability
 
 If script capability is enabled, the runtime MUST support synchronous execution and MAY additionally support stream-mode execution.
 
@@ -549,7 +660,7 @@ If the selected external script is missing from the allowed root, or the selecte
 
 If script capability is disabled, `script_exec` MUST fail explicitly.
 
-### 17. Shell Execution Capability
+### 18. Shell Execution Capability
 
 If shell capability is enabled, the runtime MUST support synchronous execution and MAY additionally support stream-mode execution.
 
@@ -596,7 +707,7 @@ General stdin streaming is not required in v1 of this stream model.
 
 If shell capability is disabled, `shell_exec` MUST fail explicitly.
 
-### 18. Idle and Shutdown Behavior
+### 19. Idle and Shutdown Behavior
 
 Browser builds SHOULD shut down after a configurable idle period once all active frontend connections are gone.
 

@@ -164,18 +164,50 @@ This is the architectural seam that allows filesystem bytes and live process out
 
 ### 6. Filesystem Bridge
 
-`fs.go` owns path validation and allowed file operations relative to the resolved app root.
+`fs.go` owns path validation and all file operations relative to the resolved app root. The implementation targets practical parity with `node:fs/promises` (see [ADR-0001](adr/0001-fs-promises-parity.md)).
 
 Responsibilities:
 
 - sanitize and resolve paths,
-- reject escaping paths,
-- perform byte-oriented file access,
-- provide text helpers layered over byte transfer,
-- perform list/delete/exists,
+- reject escaping paths (absolute, parent traversal, symlink escape),
+- perform byte-oriented and text-oriented file access,
+- directory lifecycle: create (`Mkdir`, `MkdirAll`), list (`ReadDir`), remove empty (`Rmdir`), recursive remove (`RemoveAll`, `Remove`),
+- temporary directory creation (`Mkdtemp`),
+- file lifecycle: read (`ReadBytes`, `Read`), write (`WriteBytes`, `Write`), append (`AppendFile`), truncate (`Truncate`), delete/unlink (`Remove`, `Delete`),
+- copy and move: `CopyFile` (single file), `Rename` (cross-directory move),
+- metadata and inspection: `Stat`, `Lstat`, `Access`, `Readlink`, `Realpath`,
+- mode and timestamp mutation: `Chmod`, `Utimes`,
+- symlink creation: `Symlink`, `Link`,
+- open-handle workflows: `Open` returns an `*os.File` for handle-based I/O,
 - integrate with watch registration.
 
+The filesystem bridge is organized into method categories:
+
+| Category | Methods |
+|---|---|
+| Read | `Read`, `ReadBytes`, `ReadFile` (os.ReadFile) |
+| Write | `Write`, `WriteBytes`, `WriteFile` (os.WriteFile) |
+| Directory | `Mkdir`, `MkdirAll`, `ReadDir`, `Rmdir`, `Mkdtemp` |
+| Copy/Move/Delete | `Rename`, `CopyFile`, `Remove` (unlink), `RemoveAll` (rm), `Delete` (legacy, file-only) |
+| Metadata | `Stat`, `Lstat`, `Access`, `Exists` (legacy) |
+| Mutation | `Chmod`, `Utimes`, `Truncate`, `AppendFile` |
+| Links | `Symlink`, `Readlink`, `Link`, `Realpath` |
+| Open handle | `Open`, `OpenRead` (legacy), `OpenWrite` (legacy) |
+
 The filesystem code is always present in the runtime, but the frontend-facing filesystem capability is gated by configuration.
+
+#### FileHandle lifecycle (runtime side)
+
+When `fs_open` is requested over the wire, the runtime:
+
+1. resolves and validates the path through `FSBridge.Open(path, flags, perm)`,
+2. stores the open `*os.File` in a handle registry keyed by a unique handle ID (reuses the stream management infrastructure),
+3. returns the handle ID to the frontend,
+4. forwards subsequent `handle_*` operations to the registered handle,
+5. closes the OS handle and removes the registry entry on `handle_close`,
+6. cleans up all handles owned by a connection when that WebSocket connection closes.
+
+The handle registry is in-memory and per-runtime-instance. Handle IDs are unique within a runtime session.
 
 ### 7. Script Bridge
 
@@ -262,7 +294,8 @@ Responsibilities:
 - open and manage the WebSocket connection,
 - encode and decode the binary frame envelope,
 - provide promise-style control requests,
-- expose Node-inspired text, binary, and stream helpers,
+- expose a Node-style canonical filesystem API (`readFile`, `writeFile`, `readdir`, `mkdir`, `stat`, `rm`, `unlink`, `rename`, `copyFile`, `appendFile`, `access`, `open` for FileHandle, and all other `fs/promises`-shaped methods),
+- expose backward-compatible wrapper methods for the legacy Luminka-specific names (`readText`, `writeText`, `list`, `remove`, `exists`),
 - expose tracked text file helpers for two-way file-backed state,
 - wrap filesystem, script, shell, and app-info calls,
 - expose low-level runtime broadcast helpers,
@@ -274,10 +307,11 @@ The SDK is in-repo and first-class, but not a standalone npm product.
 
 The TypeScript file remains the source of truth. The repository also owns a generated JavaScript distribution surface under `sdk/dist/` for consumers who want a ready-to-embed browser artifact without importing the TypeScript source directly.
 
-The SDK preserves two filesystem layers:
+The SDK preserves three filesystem layers:
 
-- raw helpers such as `watch`, `unwatch`, and `onFileChanged`, which forward runtime watch behavior without origin filtering,
-- friendly tracked text file helpers, which maintain per-file known text, debounce raw change notifications, re-read after changes, suppress echoes from SDK-originated saves, and notify subscribers only for meaningful external content changes.
+- **Node-style canonical methods** (the primary contract): `readFile`, `writeFile`, `readdir`, `mkdir`, `stat`, `lstat`, `rm`, `unlink`, `rename`, `copyFile`, `appendFile`, `access`, `chmod`, `utimes`, `truncate`, `symlink`, `readlink`, `realpath`, `link`, `open` (FileHandle), `mkdtemp`, `rmdir`,
+- **Legacy convenience wrappers** (backward compat, may be removed in a future major version): `readText`, `writeText`, `readBytes`, `writeBytes`, `list`, `remove`, `exists`,
+- **Tracked text file helpers** (`trackedTextFile`), which maintain per-file known text, debounce raw change notifications, re-read after changes, suppress echoes from SDK-originated saves, and notify subscribers only for meaningful external content changes.
 
 Both consumption lanes are first-class:
 

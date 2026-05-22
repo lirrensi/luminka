@@ -35,11 +35,14 @@ export interface LuminkaFrame {
   ok?: boolean;
   error?: string;
   path?: string;
+  src?: string;
+  dest?: string;
   data?: unknown;
   channel?: string;
   content_type?: string;
   echo?: boolean;
   files?: string[];
+  file_types?: string[];
   exists?: boolean;
   runner?: string;
   file?: string;
@@ -60,12 +63,58 @@ export interface LuminkaFrame {
   seq?: number;
   lane?: string;
   eof?: boolean;
+  flag?: string;
+  perm?: number;
+  atime?: string;
+  mtime?: string;
+  len?: number;
+  stat?: {
+    size: number;
+    mode: number;
+    mod_time: string;
+    is_dir: boolean;
+    is_symlink: boolean;
+  };
+  handle_id?: string;
 }
 
 export interface ExecStreamResult {
   stdout: ReadableStream<Uint8Array>;
   stderr: ReadableStream<Uint8Array>;
   completed: Promise<{ code: number | null; stdout: string; stderr: string }>;
+}
+
+export interface StatResult {
+  size: number;
+  mode: number;
+  modTime: string;
+  isDirectory: boolean;
+  isSymlink: boolean;
+}
+
+export interface DirEntry {
+  name: string;
+  isDirectory: boolean;
+  isSymlink: boolean;
+}
+
+export interface FileHandle {
+  read(options?: { length?: number; position?: number }): Promise<Uint8Array>;
+  write(data: Uint8Array, position?: number): Promise<void>;
+  close(): Promise<void>;
+  stat(): Promise<StatResult>;
+  truncate(len?: number): Promise<void>;
+  readFile(): Promise<Uint8Array>;
+  writeFile(data: Uint8Array): Promise<void>;
+  appendFile(data: Uint8Array): Promise<void>;
+  chmod(mode: number): Promise<void>;
+  utimes(atime: number | Date, mtime: number | Date): Promise<void>;
+  sync(): Promise<void>;
+  datasync(): Promise<void>;
+  createReadStream(options?: { start?: number }): ReadableStream<Uint8Array>;
+  createWriteStream(): WritableStream<Uint8Array>;
+  readLines(options?: { encoding?: string }): AsyncGenerator<string, void, void>;
+  readableWebStream(options?: { start?: number }): ReadableStream<Uint8Array>;
 }
 
 export interface LuminkaBroadcastMessage<T = unknown> {
@@ -126,7 +175,7 @@ export interface TrackedTextFile {
 }
 
 type RequestRecord = {
-  resolve: (frame: LuminkaFrame) => void;
+  resolve: (frame: LuminkaFrame, payload?: Uint8Array) => void;
   reject: (error: Error) => void;
 };
 
@@ -273,12 +322,11 @@ export class LuminkaClient {
   }
 
   async readText(path: string): Promise<string> {
-    const response = await this.request({ event: "fs_read_text", path });
-    return this.requireData(response, "file data");
+    return this.readFile(path, { encoding: "utf8" }) as Promise<string>;
   }
 
   async writeText(path: string, data: string): Promise<void> {
-    await this.request({ event: "fs_write_text", path, data });
+    await this.writeFile(path, data);
   }
 
   async readBytes(path: string): Promise<Uint8Array> {
@@ -344,18 +392,164 @@ export class LuminkaClient {
     });
   }
 
+  // === Legacy compatibility wrappers ===
+  // These delegate to the canonical Node-style API.
+
   async list(path = ""): Promise<string[]> {
-    const response = await this.request({ event: "fs_list", path });
-    return response.files ?? [];
+    return this.readdir(path) as Promise<string[]>;
   }
 
   async remove(path: string): Promise<void> {
-    await this.request({ event: "fs_delete", path });
+    await this.unlink(path);
   }
 
   async exists(path: string): Promise<boolean> {
-    const response = await this.request({ event: "fs_exists", path });
-    return response.exists ?? false;
+    try {
+      await this.access(path);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // === Node-style canonical API ===
+
+  async access(path: string, mode?: number): Promise<void> {
+    const response = await this.request({ event: "fs_access", path, perm: mode ?? 0 });
+    if (!response.ok) throw this.responseError(response);
+  }
+
+  async appendFile(path: string, data: string | Uint8Array): Promise<void> {
+    const bytes = typeof data === "string" ? textEncoder.encode(data) : data;
+    await this.request({ event: "fs_append_file", path }, bytes);
+  }
+
+  async chmod(path: string, mode: number): Promise<void> {
+    await this.request({ event: "fs_chmod", path, perm: mode });
+  }
+
+  async copyFile(src: string, dest: string, mode?: number): Promise<void> {
+    await this.request({ event: "fs_copy_file", src, dest, perm: mode ?? 0 });
+  }
+
+  async cp(src: string, dest: string, options?: { recursive?: boolean }): Promise<void> {
+    await this.request({
+      event: "fs_cp",
+      src,
+      dest,
+      flag: options?.recursive ? "recursive" : "",
+    });
+  }
+
+  async link(existingPath: string, newPath: string): Promise<void> {
+    await this.request({ event: "fs_link", src: existingPath, path: newPath });
+  }
+
+  async lstat(path: string): Promise<StatResult> {
+    const response = await this.request({ event: "fs_lstat", path });
+    return this.requireStat(response);
+  }
+
+  async mkdir(path: string, options?: { recursive?: boolean; mode?: number }): Promise<void> {
+    await this.request({
+      event: "fs_mkdir",
+      path,
+      perm: options?.mode,
+      flag: options?.recursive ? "recursive" : "",
+    });
+  }
+
+  async mkdtemp(prefix: string): Promise<string> {
+    const response = await this.request({ event: "fs_mkdtemp", path: prefix });
+    return this.requireData(response, "tmp dir path");
+  }
+
+  async open(path: string, flags?: string, mode?: number): Promise<FileHandle> {
+    const response = await this.request({ event: "fs_open", path, flag: flags ?? "r", perm: mode ?? 0 });
+    const handleId = this.requireStreamId(response, "fs_open");
+    return new LuminkaFileHandle(this, handleId);
+  }
+
+  async opendir(path: string): Promise<{ entries: DirEntry[] }> {
+    const entries = await this.readdir(path, { withFileTypes: true }) as DirEntry[];
+    return { entries };
+  }
+
+  async readFile(path: string, options?: { encoding?: "utf8" | "binary" }): Promise<string | Uint8Array> {
+    if (options?.encoding === "utf8") {
+      const response = await this.request({ event: "fs_read_file", path, flag: "utf8" });
+      return this.requireData(response, "file data");
+    }
+    // Binary: use stream-based read
+    return this.readBytes(path);
+  }
+
+  async readdir(path: string, options?: { withFileTypes?: boolean }): Promise<string[] | DirEntry[]> {
+    const response = await this.request({ event: "fs_readdir", path });
+    const names = response.files ?? [];
+    if (options?.withFileTypes) {
+      const types = response.file_types ?? [];
+      return names.map((name, i) => ({
+        name,
+        isDirectory: types[i] === "directory",
+        isSymlink: types[i] === "symlink",
+      }));
+    }
+    return names;
+  }
+
+  async readlink(path: string): Promise<string> {
+    const response = await this.request({ event: "fs_readlink", path });
+    return this.requireData(response, "link target");
+  }
+
+  async realpath(path: string): Promise<string> {
+    const response = await this.request({ event: "fs_realpath", path });
+    return this.requireData(response, "resolved path");
+  }
+
+  async rename(oldPath: string, newPath: string): Promise<void> {
+    await this.request({ event: "fs_rename", path: oldPath, dest: newPath });
+  }
+
+  async rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void> {
+    await this.request({
+      event: "fs_rm",
+      path,
+      flag: options?.recursive ? "recursive" : "",
+    });
+  }
+
+  async rmdir(path: string): Promise<void> {
+    await this.request({ event: "fs_rmdir", path });
+  }
+
+  async stat(path: string): Promise<StatResult> {
+    const response = await this.request({ event: "fs_stat", path });
+    return this.requireStat(response);
+  }
+
+  async symlink(target: string, path: string, type?: string): Promise<void> {
+    await this.request({ event: "fs_symlink", src: target, path, flag: type ?? "" });
+  }
+
+  async truncate(path: string, len?: number): Promise<void> {
+    await this.request({ event: "fs_truncate", path, len: len ?? 0 });
+  }
+
+  async unlink(path: string): Promise<void> {
+    await this.request({ event: "fs_unlink", path });
+  }
+
+  async utimes(path: string, atime: number | Date, mtime: number | Date): Promise<void> {
+    const atimeStr = typeof atime === "number" ? String(atime) : atime.toISOString();
+    const mtimeStr = typeof mtime === "number" ? String(mtime) : mtime.toISOString();
+    await this.request({ event: "fs_utimes", path, atime: atimeStr, mtime: mtimeStr });
+  }
+
+  async writeFile(path: string, data: string | Uint8Array): Promise<void> {
+    const bytes = typeof data === "string" ? textEncoder.encode(data) : data;
+    await this.request({ event: "fs_write_file", path }, bytes);
   }
 
   async watch(path: string): Promise<void> {
@@ -392,10 +586,10 @@ export class LuminkaClient {
   }
 
   async log(message: string): Promise<void> {
-    const existing = await this.readText("luminka.log").catch(() => "");
+    const existing = await this.readFile("luminka.log", { encoding: "utf8" }).catch(() => "");
     const timestamp = new Date().toISOString();
     const line = `[${timestamp}] ${message}\n`;
-    await this.writeText("luminka.log", existing + line);
+    await this.writeFile("luminka.log", existing + line);
   }
 
   async runScript(runner: string, file: string, args: string[] = [], timeout?: number): Promise<{ stdout: string; stderr: string; code: number | null }> {
@@ -417,11 +611,11 @@ export class LuminkaClient {
   }
 
   async read(path: string): Promise<string> {
-    return this.readText(path);
+    return this.readFile(path, { encoding: "utf8" }) as Promise<string>;
   }
 
   async write(path: string, data: string): Promise<void> {
-    await this.writeText(path, data);
+    await this.writeFile(path, data);
   }
 
   onFileChanged(listener: (path: string) => void): () => void {
@@ -499,7 +693,15 @@ export class LuminkaClient {
     const id = this.nextId();
     const frame = encodeLuminkaFrame({ ...payload, id }, requestPayload);
     return new Promise<LuminkaFrame>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, {
+        resolve: (header, responsePayload) => {
+          if (responsePayload && responsePayload.byteLength > 0) {
+            (header as Record<string, unknown>)._payload = responsePayload;
+          }
+          resolve(header);
+        },
+        reject,
+      });
       try {
         socket.send(frame);
       } catch (error) {
@@ -581,7 +783,7 @@ export class LuminkaClient {
       this.removeStream(closedStreamId);
     }
 
-    pending.resolve(message.header);
+    pending.resolve(message.header, message.payload);
   }
 
   private handleStreamChunk(header: LuminkaFrame, payload: Uint8Array): void {
@@ -855,6 +1057,20 @@ export class LuminkaClient {
     };
   }
 
+  private requireStat(response: LuminkaFrame): StatResult {
+    const stat = response.stat;
+    if (!stat) {
+      throw new Error("Luminka stat response did not include stat data");
+    }
+    return {
+      size: stat.size ?? 0,
+      mode: stat.mode ?? 0,
+      modTime: stat.mod_time ?? "",
+      isDirectory: stat.is_dir ?? false,
+      isSymlink: stat.is_symlink ?? false,
+    };
+  }
+
   private requireStreamId(response: LuminkaFrame, event: string): string {
     if (!response.stream_id) {
       throw new Error(`${event} response did not include a stream_id`);
@@ -1039,6 +1255,162 @@ class LuminkaTrackedTextFile implements TrackedTextFile {
       globalThis.clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
+  }
+}
+
+class LuminkaFileHandle implements FileHandle {
+  private closed = false;
+
+  constructor(
+    private readonly client: LuminkaClient,
+    private readonly handleId: string,
+  ) {}
+
+  private assertOpen(): void {
+    if (this.closed) {
+      throw new Error(`FileHandle ${this.handleId} is closed`);
+    }
+  }
+
+  async read(options?: { length?: number; position?: number }): Promise<Uint8Array> {
+    this.assertOpen();
+    const response = await this.client.request({
+      event: "handle_read",
+      stream_id: this.handleId,
+      len: options?.position ?? 0,
+      perm: options?.length ?? 0,
+    });
+    const payload = (response as Record<string, unknown>)._payload as Uint8Array | undefined;
+    return payload ?? new Uint8Array();
+  }
+
+  async write(data: Uint8Array, position?: number): Promise<void> {
+    this.assertOpen();
+    await this.client.request(
+      { event: "handle_write", stream_id: this.handleId, len: position ?? 0 },
+      data,
+    );
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    await this.client.request({ event: "handle_close", stream_id: this.handleId });
+  }
+
+  async stat(): Promise<StatResult> {
+    this.assertOpen();
+    const response = await this.client.request({ event: "handle_stat", stream_id: this.handleId });
+    return this.client["requireStat"](response);
+  }
+
+  async truncate(len?: number): Promise<void> {
+    this.assertOpen();
+    await this.client.request({ event: "handle_truncate", stream_id: this.handleId, len: len ?? 0 });
+  }
+
+  async sync(): Promise<void> {
+    this.assertOpen();
+    await this.client.request({ event: "handle_sync", stream_id: this.handleId });
+  }
+
+  async datasync(): Promise<void> {
+    this.assertOpen();
+    await this.client.request({ event: "handle_datasync", stream_id: this.handleId });
+  }
+
+  async readFile(): Promise<Uint8Array> {
+    this.assertOpen();
+    // Read full file through handle — read with no position/length to get remaining data
+    return this.read({ length: 0 });
+  }
+
+  async writeFile(data: Uint8Array): Promise<void> {
+    this.assertOpen();
+    // Truncate first, then write
+    await this.truncate(0);
+    await this.write(data);
+  }
+
+  async appendFile(data: Uint8Array): Promise<void> {
+    this.assertOpen();
+    await this.client.request({ event: "handle_write", stream_id: this.handleId }, data);
+  }
+
+  async chmod(mode: number): Promise<void> {
+    this.assertOpen();
+    await this.client.request({ event: "handle_chmod", stream_id: this.handleId, perm: mode });
+  }
+
+  async utimes(atime: number | Date, mtime: number | Date): Promise<void> {
+    this.assertOpen();
+    const atimeStr = typeof atime === "number" ? String(atime) : atime.toISOString();
+    const mtimeStr = typeof mtime === "number" ? String(mtime) : mtime.toISOString();
+    await this.client.request({ event: "handle_utimes", stream_id: this.handleId, atime: atimeStr, mtime: mtimeStr });
+  }
+
+  createReadStream(options?: { start?: number }): ReadableStream<Uint8Array> {
+    this.assertOpen();
+    let position = options?.start ?? -1;
+    let streamClosed = false;
+
+    return new ReadableStream<Uint8Array>({
+      pull: async (controller) => {
+        if (streamClosed) {
+          controller.close();
+          return;
+        }
+        const readOpts: { length?: number; position?: number } = { length: DEFAULT_CHUNK_SIZE };
+        if (position >= 0) readOpts.position = position;
+        const data = await this.read(readOpts);
+        if (data.byteLength === 0) {
+          streamClosed = true;
+          controller.close();
+          return;
+        }
+        if (position >= 0) position += data.byteLength;
+        controller.enqueue(data);
+      },
+      cancel: async () => {
+        if (streamClosed) return;
+        streamClosed = true;
+        try {
+          await this.close();
+        } catch {
+          // Cancel is best-effort cleanup — ignore close errors
+        }
+      },
+    });
+  }
+
+  createWriteStream(): WritableStream<Uint8Array> {
+    this.assertOpen();
+    return new WritableStream<Uint8Array>({
+      write: async (chunk) => {
+        await this.write(chunk);
+      },
+    });
+  }
+
+  async *readLines(options?: { encoding?: string }): AsyncGenerator<string, void, void> {
+    this.assertOpen();
+    let buffer = "";
+    const decoder = new TextDecoder(options?.encoding);
+    while (true) {
+      const chunk = await this.read({ length: DEFAULT_CHUNK_SIZE });
+      if (chunk.byteLength === 0) break;
+      buffer += decoder.decode(chunk, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        yield line;
+      }
+    }
+    if (buffer.length > 0) yield buffer;
+  }
+
+  readableWebStream(options?: { start?: number }): ReadableStream<Uint8Array> {
+    return this.createReadStream(options);
   }
 }
 

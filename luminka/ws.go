@@ -24,11 +24,14 @@ type wsMessage struct {
 	Ok              *bool           `json:"ok,omitempty"`
 	Error           string          `json:"error,omitempty"`
 	Path            string          `json:"path,omitempty"`
+	Src             string          `json:"src,omitempty"`
+	Dest            string          `json:"dest,omitempty"`
 	Data            json.RawMessage `json:"data,omitempty"`
 	Channel         string          `json:"channel,omitempty"`
 	ContentType     string          `json:"content_type,omitempty"`
 	Echo            bool            `json:"echo,omitempty"`
 	Files           []string        `json:"files,omitempty"`
+	FileTypes       []string        `json:"file_types,omitempty"`
 	Exists          *bool           `json:"exists,omitempty"`
 	Runner          string          `json:"runner,omitempty"`
 	File            string          `json:"file,omitempty"`
@@ -49,6 +52,13 @@ type wsMessage struct {
 	Lane            string          `json:"lane,omitempty"`
 	EOF             bool            `json:"eof,omitempty"`
 	Capabilities    capabilityState `json:"capabilities,omitempty"`
+	Flag            string          `json:"flag,omitempty"`
+	Perm            uint32          `json:"perm,omitempty"`
+	Atime           string          `json:"atime,omitempty"`
+	Mtime           string          `json:"mtime,omitempty"`
+	Len             int64           `json:"len,omitempty"`
+	Stat            json.RawMessage `json:"stat,omitempty"`
+	HandleID        string          `json:"handle_id,omitempty"`
 }
 
 type websocketConn interface {
@@ -69,11 +79,14 @@ func (m wsMessage) MarshalJSON() ([]byte, error) {
 		Ok              *bool            `json:"ok,omitempty"`
 		Error           string           `json:"error,omitempty"`
 		Path            string           `json:"path,omitempty"`
+		Src             string           `json:"src,omitempty"`
+		Dest            string           `json:"dest,omitempty"`
 		Data            json.RawMessage  `json:"data,omitempty"`
 		Channel         string           `json:"channel,omitempty"`
 		ContentType     string           `json:"content_type,omitempty"`
 		Echo            bool             `json:"echo,omitempty"`
 		Files           []string         `json:"files,omitempty"`
+		FileTypes       []string         `json:"file_types,omitempty"`
 		Exists          *bool            `json:"exists,omitempty"`
 		Runner          string           `json:"runner,omitempty"`
 		File            string           `json:"file,omitempty"`
@@ -94,6 +107,13 @@ func (m wsMessage) MarshalJSON() ([]byte, error) {
 		Lane            string           `json:"lane,omitempty"`
 		EOF             bool             `json:"eof,omitempty"`
 		Capabilities    *capabilityState `json:"capabilities,omitempty"`
+		Flag            string           `json:"flag,omitempty"`
+		Perm            uint32           `json:"perm,omitempty"`
+		Atime           string           `json:"atime,omitempty"`
+		Mtime           string           `json:"mtime,omitempty"`
+		Len             int64            `json:"len,omitempty"`
+		Stat            json.RawMessage  `json:"stat,omitempty"`
+		HandleID        string           `json:"handle_id,omitempty"`
 	}
 	out := wire{
 		Event:           m.Event,
@@ -101,11 +121,14 @@ func (m wsMessage) MarshalJSON() ([]byte, error) {
 		Ok:              m.Ok,
 		Error:           m.Error,
 		Path:            m.Path,
+		Src:             m.Src,
+		Dest:            m.Dest,
 		Data:            m.Data,
 		Channel:         m.Channel,
 		ContentType:     m.ContentType,
 		Echo:            m.Echo,
 		Files:           m.Files,
+		FileTypes:       m.FileTypes,
 		Exists:          m.Exists,
 		Runner:          m.Runner,
 		File:            m.File,
@@ -125,6 +148,13 @@ func (m wsMessage) MarshalJSON() ([]byte, error) {
 		Seq:             m.Seq,
 		Lane:            m.Lane,
 		EOF:             m.EOF,
+		Flag:            m.Flag,
+		Perm:            m.Perm,
+		Atime:           m.Atime,
+		Mtime:           m.Mtime,
+		Len:             m.Len,
+		Stat:            m.Stat,
+		HandleID:        m.HandleID,
 	}
 	if m.Event == "app_info" || m.Capabilities != (capabilityState{}) {
 		caps := m.Capabilities
@@ -208,7 +238,17 @@ func (rt *Runtime) handleWebSocketSession(wsConn *wsConnection) {
 				Root:            rt.Root,
 				Capabilities:    rt.Capabilities,
 			})
-		case "fs_read_text", "fs_write_text", "fs_list", "fs_delete", "fs_exists", "fs_watch", "fs_unwatch", "fs_open_read", "fs_open_write", "stream_chunk", "stream_close":
+		case "fs_read_text", "fs_write_text", "fs_list", "fs_delete", "fs_exists",
+			"fs_watch", "fs_unwatch", "fs_open_read", "fs_open_write",
+			"stream_chunk", "stream_close",
+			"fs_access", "fs_append_file", "fs_chmod", "fs_copy_file", "fs_cp",
+			"fs_link", "fs_lstat", "fs_mkdir", "fs_mkdtemp", "fs_open",
+			"fs_read_file", "fs_readdir", "fs_readlink", "fs_realpath",
+			"fs_rename", "fs_rm", "fs_rmdir", "fs_stat", "fs_symlink",
+			"fs_truncate", "fs_unlink", "fs_utimes", "fs_write_file",
+			"handle_read", "handle_write", "handle_close", "handle_stat",
+			"handle_truncate", "handle_sync", "handle_datasync",
+			"handle_chmod", "handle_utimes":
 			_ = rt.handleFilesystemRequest(wsConn, request, payload)
 		case "broadcast":
 			_ = rt.handleBroadcastRequest(wsConn, request, payload)

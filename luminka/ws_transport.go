@@ -68,3 +68,19 @@ func writeFSStreamResponse(conn *wsConnection, id json.RawMessage, ok bool, errM
 func writeExecResponse(conn *wsConnection, event string, id json.RawMessage, ok bool, errMsg, stdout, stderr string, code *int) error {
 	return writeWSMessage(conn, wsMessage{Event: event, ID: id, Ok: boolPtr(ok), Error: errMsg, Stdout: stdout, Stderr: stderr, Code: code})
 }
+
+func writeStatResponse(conn *wsConnection, id json.RawMessage, ok bool, errMsg string, stat map[string]any) error {
+	statData, err := json.Marshal(stat)
+	if err != nil {
+		return writeFSResponse(conn, id, false, "failed to marshal stat", nil, nil, nil)
+	}
+	return writeWSMessage(conn, wsMessage{Event: "fs_response", ID: id, Ok: boolPtr(ok), Error: errMsg, Stat: statData})
+}
+
+func writeFSResponseWithTypes(conn *wsConnection, id json.RawMessage, ok bool, errMsg string, files, fileTypes []string) error {
+	return writeWSMessage(conn, wsMessage{Event: "fs_response", ID: id, Ok: boolPtr(ok), Error: errMsg, Files: files, FileTypes: fileTypes})
+}
+
+func writeDataResponse(conn *wsConnection, id json.RawMessage, ok bool, errMsg, data string) error {
+	return writeWSMessage(conn, wsMessage{Event: "fs_response", ID: id, Ok: boolPtr(ok), Error: errMsg, Data: rawStringData(data)})
+}

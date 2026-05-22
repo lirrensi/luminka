@@ -19,6 +19,7 @@ type streamKind string
 const (
 	streamKindRead          streamKind = "read"
 	streamKindWrite         streamKind = "write"
+	streamKindHandle        streamKind = "handle"
 	streamKindProcessOutput streamKind = "process_output"
 )
 
@@ -55,6 +56,27 @@ func (sr *streamRegistry) registerWrite(conn *wsConnection) *streamState {
 
 func (sr *streamRegistry) registerProcessOutput(conn *wsConnection) *streamState {
 	return sr.register(conn, streamKindProcessOutput)
+}
+
+func (sr *streamRegistry) registerHandle(conn *wsConnection, file *os.File) *streamState {
+	if sr == nil || conn == nil || file == nil {
+		return nil
+	}
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	sr.nextID++
+	state := &streamState{
+		id:   fmt.Sprintf("handle-%d", sr.nextID),
+		kind: streamKindHandle,
+		conn: conn,
+		file: file,
+	}
+	sr.streams[state.id] = state
+	if sr.byConnection[conn] == nil {
+		sr.byConnection[conn] = make(map[string]struct{})
+	}
+	sr.byConnection[conn][state.id] = struct{}{}
+	return state
 }
 
 func (sr *streamRegistry) register(conn *wsConnection, kind streamKind) *streamState {

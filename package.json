@@ -32,11 +32,11 @@
         "test:sdk": "tsx --test luminka/sdk/luminka.test.ts"
     },
     "devDependencies": {
-        "@types/node": "^25.5.0",
+        "@types/node": "^25.9.1",
         "@fiahfy/icns": "^0.0.7",
         "png-to-ico": "^3.0.1",
         "sharp": "^0.34.5",
-        "tsx": "^4.21.0",
-        "typescript": "^6.0.2"
+        "tsx": "^4.22.3",
+        "typescript": "^6.0.3"
     }
 }

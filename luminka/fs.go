@@ -8,6 +8,9 @@ package luminka
 
 import (
 	"errors"
+	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,6 +151,266 @@ func (fsb *FSBridge) Exists(path string) (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+// --- Directory operations ---
+
+func (fsb *FSBridge) Mkdir(path string, perm os.FileMode) error {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return err
+	}
+	return os.Mkdir(resolved, perm)
+}
+
+func (fsb *FSBridge) MkdirAll(path string, perm os.FileMode) error {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return err
+	}
+	return os.MkdirAll(resolved, perm)
+}
+
+func (fsb *FSBridge) ReadDir(path string) ([]os.DirEntry, error) {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadDir(resolved)
+}
+
+func (fsb *FSBridge) Rmdir(path string) error {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return err
+	}
+	return os.Remove(resolved)
+}
+
+func (fsb *FSBridge) Mkdtemp(prefix string) (string, error) {
+	resolved, err := fsb.sanitize(prefix)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Dir(resolved)
+	base := filepath.Base(resolved)
+	return os.MkdirTemp(dir, base)
+}
+
+// --- Copy, move, delete ---
+
+func (fsb *FSBridge) Rename(oldPath, newPath string) error {
+	oldResolved, err := fsb.sanitize(oldPath)
+	if err != nil {
+		return err
+	}
+	newResolved, err := fsb.sanitize(newPath)
+	if err != nil {
+		return err
+	}
+	return os.Rename(oldResolved, newResolved)
+}
+
+func (fsb *FSBridge) CopyFile(src, dst string) error {
+	srcResolved, err := fsb.sanitize(src)
+	if err != nil {
+		return err
+	}
+	dstResolved, err := fsb.sanitize(dst)
+	if err != nil {
+		return err
+	}
+	return copyFileContent(srcResolved, dstResolved)
+}
+
+func copyFileContent(srcResolved, dstResolved string) error {
+	srcFile, err := os.Open(srcResolved)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+	if err := os.MkdirAll(filepath.Dir(dstResolved), 0o755); err != nil {
+		return err
+	}
+	dstFile, err := os.OpenFile(dstResolved, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+	_, err = io.Copy(dstFile, srcFile)
+	return err
+}
+
+func (fsb *FSBridge) Cp(src, dst string, recursive bool) error {
+	srcResolved, err := fsb.sanitize(src)
+	if err != nil {
+		return err
+	}
+	dstResolved, err := fsb.sanitize(dst)
+	if err != nil {
+		return err
+	}
+
+	srcInfo, err := os.Stat(srcResolved)
+	if err != nil {
+		return err
+	}
+
+	if srcInfo.IsDir() {
+		if !recursive {
+			return fmt.Errorf("cannot copy directory %q without recursive flag", src)
+		}
+		return filepath.WalkDir(srcResolved, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			rel, relErr := filepath.Rel(srcResolved, path)
+			if relErr != nil {
+				return relErr
+			}
+			target := filepath.Join(dstResolved, rel)
+			if d.IsDir() {
+				return os.MkdirAll(target, 0o755)
+			}
+			return copyFileContent(path, target)
+		})
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dstResolved), 0o755); err != nil {
+		return err
+	}
+	return copyFileContent(srcResolved, dstResolved)
+}
+
+func (fsb *FSBridge) Remove(path string) error {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return err
+	}
+	return os.Remove(resolved)
+}
+
+func (fsb *FSBridge) RemoveAll(path string) error {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(resolved)
+}
+
+// --- Metadata ---
+
+func (fsb *FSBridge) Stat(path string) (os.FileInfo, error) {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return nil, err
+	}
+	return os.Stat(resolved)
+}
+
+func (fsb *FSBridge) Lstat(path string) (os.FileInfo, error) {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return nil, err
+	}
+	return os.Lstat(resolved)
+}
+
+func (fsb *FSBridge) Access(path string, mode os.FileMode) error {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return err
+	}
+	_, err = os.Stat(resolved)
+	return err
+}
+
+// --- Mutation ---
+
+func (fsb *FSBridge) Chmod(path string, mode os.FileMode) error {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return err
+	}
+	return os.Chmod(resolved, mode)
+}
+
+func (fsb *FSBridge) Utimes(path string, atime, mtime time.Time) error {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return err
+	}
+	return os.Chtimes(resolved, atime, mtime)
+}
+
+func (fsb *FSBridge) Truncate(path string, size int64) error {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return err
+	}
+	return os.Truncate(resolved, size)
+}
+
+func (fsb *FSBridge) Symlink(target, linkPath string) error {
+	// The symlink target is stored as-is (may be relative or absolute).
+	// Only the link path must be within the app root.
+	linkResolved, err := fsb.sanitize(linkPath)
+	if err != nil {
+		return err
+	}
+	return os.Symlink(target, linkResolved)
+}
+
+func (fsb *FSBridge) Readlink(path string) (string, error) {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return "", err
+	}
+	return os.Readlink(resolved)
+}
+
+func (fsb *FSBridge) Realpath(path string) (string, error) {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(resolved)
+}
+
+func (fsb *FSBridge) Link(oldPath, newPath string) error {
+	oldResolved, err := fsb.sanitize(oldPath)
+	if err != nil {
+		return err
+	}
+	newResolved, err := fsb.sanitize(newPath)
+	if err != nil {
+		return err
+	}
+	return os.Link(oldResolved, newResolved)
+}
+
+func (fsb *FSBridge) AppendFile(path string, data []byte) error {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(resolved, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(data)
+	return err
+}
+
+// --- Open handle ---
+
+func (fsb *FSBridge) Open(path string, flags int, perm os.FileMode) (*os.File, error) {
+	resolved, err := fsb.sanitize(path)
+	if err != nil {
+		return nil, err
+	}
+	return os.OpenFile(resolved, flags, perm)
 }
 
 func normalizeRelativePath(path string) (string, error) {
