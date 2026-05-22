@@ -6,7 +6,7 @@
 
 Luminka is a tiny Go runtime for turning a built web app into a portable `.exe`.
 
-Current release: **v3.1.0** — adds local broadcast coordination for multi-tab browser apps plus single-instance/webview quality-of-life polish, without changing the normal SDK adoption path.
+Current release: **v3.2.0** — major filesystem expansion bringing full `node:fs/promises` API parity. Your web app now gets proper hands for local files: read, write, move, copy, browse, inspect, watch, truncate, append, and open handles with partial reads, streaming, and line iteration.
 
 It gives you a simple way to ship a web app like a desktop app, without Electron, Tauri, or a heavier framework shell.
 
@@ -40,9 +40,14 @@ If you import Luminka directly, rebuild the SDK outputs with `pnpm run build:sdk
 
 If you want runtime access to the filesystem, bundled scripts, or shell commands, use the Luminka SDK to talk to the host and enable the capabilities you need.
 
+The filesystem API — the heart of v3.2 — is now a mature, framework-grade surface
+with full `node:fs/promises` parity. 24 canonical methods, open handles with
+partial reads/writes, streaming, and line iteration. Your web app gets proper
+hands to work with local files, not just a thin read/write wrapper.
+
 The current bridge uses a binary WebSocket protocol with a JSON header plus raw payload bytes. That keeps file changes, stream chunks, and broadcast payloads byte-accurate instead of forcing everything through text encoding.
 
-Version 3 is mostly additive. If your app already uses the SDK, rebuild against the current SDK and it should continue naturally. The main compatibility risk is for projects that hand-edited Luminka's Go internals, custom lock-file handling, or raw WebSocket protocol code.
+Versions 3.x are additive. If your app already uses the SDK, rebuild against the current SDK and it should continue naturally. The main compatibility risk is for projects that hand-edited Luminka's Go internals, custom lock-file handling, or raw WebSocket protocol code.
 
 That is the point: keep your frontend stack, package it into one portable app, and add local power only when you want it.
 
@@ -64,6 +69,11 @@ Luminka is a great fit for apps that benefit from local files and persistent sto
 - note apps, trackers, and dashboards 🗂️
 - tools that want local saving instead of browser-only storage 💾
 - any app that feels cramped as a pure website 🌍
+
+With the v3.2 filesystem expansion giving you a full `node:fs/promises`-shaped API,
+Luminka can now power Electron-class file operations — project workspaces, local
+editors, file organisers, backup tools, and anything that needs real file
+handling — all from a portable, no-installer executable.
 
 If the browser is limiting you, Luminka gives your web app a more capable home.
 
@@ -90,6 +100,7 @@ It gives you:
 - bundled internal scripts that can live inside the `.exe` itself,
 - a **localhost WebSocket bridge** from frontend to host runtime,
 - two app shells: **browser** and **webview**,
+- a **mature, framework-grade filesystem API** with full `node:fs/promises` parity — 24 canonical methods plus open handles, streams, and line iteration,
 - explicit capability gates for **filesystem**, **scripts**, and **shell**,
 - transient local **broadcast events** between connected frontend clients,
 - SDK **multi-tab coordination** helpers for browser-mode apps.
@@ -330,8 +341,9 @@ new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" })
 - `client.disconnect()` closes the socket and rejects pending requests.
 - Capability-disabled calls fail explicitly.
 - `appInfo()` reports the resolved runtime capabilities so your frontend can adapt.
-- Text helpers: `readText()` / `writeText()`; aliases: `read()` / `write()`.
-- Byte helpers: `readBytes()` / `writeBytes()`.
+- **Canonical Node `fs/promises`-shaped API** (primary filesystem contract): `readFile()`, `writeFile()`, `readdir()`, `mkdir()`, `stat()`, `lstat()`, `rm()`, `unlink()`, `rename()`, `copyFile()`, `appendFile()`, `access()`, `chmod()`, `utimes()`, `truncate()`, `symlink()`, `readlink()`, `realpath()`, `link()`, `open()` (FileHandle), `mkdtemp()`, `rmdir()`, `cp()`.
+- **Legacy wrappers** (backward-compatible): `readText()` / `writeText()`, `readBytes()` / `writeBytes()`, `list()`, `remove()`, `exists()`, `read()` / `write()`.
+- **FileHandle** workflows: partial reads/writes, streaming, `readLines()` async iteration, `sync()` / `datasync()`.
 - Friendly file-backed state helper: `trackedTextFile()`.
 - Local broadcast helpers: `broadcast()` and `onBroadcast()`.
 - Multi-tab coordination helper: `createMultiTabCoordinator()`.
