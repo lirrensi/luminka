@@ -10,7 +10,7 @@ The current architecture target is no longer a text-only request/response bridge
 
 ## Scope Boundary
 
-**Owns**: embedded asset serving, localhost runtime, binary WebSocket framing, stream session management, capability gating, filesystem bridge, script bridge, shell bridge, single-instance handling, native window focus, runtime broadcast events, root policy resolution, browser/webview shell launching, headless launch behavior, starter scaffold, example apps, TS SDK including tracked text file helpers and multi-tab coordination helpers, packaging hooks for app icons
+**Owns**: embedded asset serving, localhost runtime, binary WebSocket framing, stream session management, capability gating, filesystem bridge, script bridge, shell bridge, single-instance handling, native window focus, runtime broadcast events, root policy resolution, browser/webview shell launching, headless launch behavior, starter scaffold, example apps, TS SDK including tracked text file helpers and multi-tab coordination helpers, packaging hooks for app icons, install script templates, platform packaging subcommands (zip, tar, deb, appdir)
 
 **Does not own**: frontend build pipelines, application-specific data schemas, remote networking, auth, cloud sync, npm distribution, PTY emulation
 
@@ -28,6 +28,15 @@ The target repository shape is:
     glossary.md
     spec.md
     arch.md
+    installation.md
+
+  cmd/
+    build/
+      main.go
+      package_zip.go
+      package_tar.go
+      package_deb.go
+      package_appdir.go
 
   luminka/
     app.go
@@ -49,6 +58,17 @@ The target repository shape is:
   sdk/
     dist/
       luminka.js
+
+  scripts/
+    install/
+      install-path.sh
+      install-path.ps1
+      install-portable.sh
+      install-portable.ps1
+      install-home.sh
+      install-home.ps1
+      uninstall.sh
+      uninstall.ps1
 
   starter/
     main.go
@@ -266,7 +286,7 @@ Both consumption lanes are first-class:
 
 The multi-tab helper owns session IDs, peer heartbeats, peer join/leave detection, arbitrary peer messages, and primary election. By default, the oldest active session is primary and newer active sessions are non-primary. The helper does not enforce UI or data policy. Apps decide whether secondary tabs become read-only, block, warn, reload, or continue.
 
-### 12. Packaging Hooks
+### 12. Packaging Hooks and Install Templates
 
 Build tooling is provided by a single Go CLI at `cmd/build/main.go` that ships inside the module. It handles tool resolution, icon generation, go-winres embedding, and Go compilation — identical whether used in-repo or imported remotely.
 
@@ -280,13 +300,35 @@ go run ./cmd/build ./starter --webview
 go run github.com/lirrensi/luminka/cmd/build@latest . --webview
 ```
 
+The build CLI also exposes packaging subcommands that produce distribution-ready artifacts from a built binary. Each packaging format is its own entry point:
+
+```bash
+go run ./cmd/build zip    ./starter   # produces app-windows-x64.zip
+go run ./cmd/build tar    ./starter   # produces app-linux-x64.tar.gz
+go run ./cmd/build deb    ./starter   # produces app_1.0.0_amd64.deb
+go run ./cmd/build appdir ./starter   # produces App.app/ (macOS)
+```
+
+Subcommands are platform-aware. The CLI only offers formats that can be produced on the current build host. An unsupported format errors out clearly.
+
 Canonical direction:
 
 - keep a single source icon asset under repository control (e.g., `assets/lumi.png`),
-- the build CLI (`go run ./cmd/build`) generates platform-specific packaging outputs from that source,
+- the build CLI generates platform-specific packaging outputs from that source,
 - it supports Windows, macOS, and Linux packaging targets,
 - on Windows, it exhaustively scans for GCC across MSYS2, MinGW-w64, TDM-GCC, Chocolatey, Scoop, and Cygwin installations, with `--gcc` for manual override,
 - the build CLI is standalone — no dependency on the Luminka runtime package, no Node.js required for Go builds.
+
+**Install script templates** live under `scripts/install/` and are shipped in the repo as a library for app developers. They are not part of the build CLI or the built binary. Each template covers one install scenario and uses placeholder strings (`__APP_NAME__`, `__BINARY_NAME__`) that the developer replaces to match their app:
+
+| Script | Scenario |
+|---|---|
+| `install-path.sh` / `.ps1` | Copy binary to `~/.local/bin/`, add to PATH, create desktop shortcut |
+| `install-portable.sh` / `.ps1` | Create a desktop shortcut to the binary in-place, no copy |
+| `install-home.sh` / `.ps1` | Copy binary to `~/.app-name/`, set that as the app root via `--root` |
+| `uninstall.sh` / `.ps1` | Reverse the above — remove from PATH, delete shortcut, optionally delete data |
+
+App developers pick the scripts that match their distribution model, customize the placeholders, and ship them alongside the binary in their release artifacts.
 
 ## Data Models / Storage
 
@@ -515,12 +557,19 @@ Operational expectations:
 | Structured instance records | Allows instance state to grow with mode and platform window identity without tuple parsing constraints | High |
 | Broadcast as primitive, not state store | Solves browser multi-tab coordination without making Luminka own app state | High |
 | Oldest active tab as default primary | Gives SDK multi-tab coordination a stable default while leaving policy to applications | Medium |
+| Subcommand-per-format packaging | Each packaging format (zip, tar, deb, appdir) is its own build CLI subcommand, making it easy to call exactly one in CI without flags | High |
+| Install script templates as repo library | Scripts live in the repo as templates that app developers copy and customize — the framework does not enforce one install model | High |
+| Placeholder-based scripts instead of parameterized | Developers edit the script once per app instead of passing the app name every invocation; simpler to ship in a release artifact | Medium |
 
 ## Implementation Pointers
 
 - Current runtime package: `luminka/*`
 - Current SDK source of truth: `luminka/sdk/luminka.ts`
 - Generated SDK distribution surface: `sdk/dist/*`
+- Build CLI: `cmd/build/main.go`
+- Packaging subcommands: `cmd/build/package_*.go`
+- Install script templates: `scripts/install/*`
+- Install and packaging patterns guide: `docs/installation.md`
 - Transitional architecture source: `agent_chat/plan_luminka_architecture_2026-03-30.md`
 
 These pointers are informative only. The canon is this document plus the rest of `docs/`.

@@ -138,7 +138,10 @@ At a high level, Luminka has four parts:
    A minimal starter for adoption and example apps, including kanban, that prove the framework shape in practice.
 
 5. **Build and packaging hooks**
-   App builds may include platform packaging resources such as icons. The canon direction is a cross-platform icon pipeline from a single source asset into Windows, macOS, and Linux packaging outputs.
+   App builds may include platform packaging resources such as icons. The canon direction is a cross-platform icon pipeline from a single source asset into Windows, macOS, and Linux packaging outputs. The build CLI also supports platform packaging subcommands (zip, tar, deb, appdir) that produce distribution-ready artifacts from a built binary.
+
+6. **Install template library**
+   The repo ships a library of install and uninstall scripts under `scripts/install/` covering the common user-profile install patterns: PATH install with desktop shortcut, portable-only shortcut, and fixed-home-directory sandbox. App developers copy, customize, and ship the scripts that match their distribution model.
 
 The frontend build system is not part of Luminka. React, Vue, vanilla HTML, or any other stack may be used as long as the final result is static assets that can be embedded into the executable.
 

@@ -49,6 +49,19 @@ var (
 )
 
 func main() {
+	// ---- subcommand dispatch ----
+	subcommand := ""
+	rawArgs := os.Args[1:]
+	if len(rawArgs) > 0 {
+		first := rawArgs[0]
+		switch first {
+		case "zip", "tar", "deb", "appdir":
+			subcommand = first
+			// Remove subcommand from os.Args, keep the rest
+			os.Args = append([]string{os.Args[0]}, rawArgs[1:]...)
+		}
+	}
+
 	flag.Usage = usage
 
 	// Reorder args so flags come before positional — Go's flag package
@@ -61,6 +74,32 @@ func main() {
 	appDir := "."
 	if flag.NArg() > 0 {
 		appDir = flag.Arg(0)
+	}
+
+	// Dispatch to packaging subcommand if one was given
+	if subcommand != "" {
+		switch subcommand {
+		case "zip":
+			if err := cmdPackageZip(appDir); err != nil {
+				fatal("%v", err)
+			}
+			return
+		case "tar":
+			if err := cmdPackageTar(appDir); err != nil {
+				fatal("%v", err)
+			}
+			return
+		case "deb":
+			if err := cmdPackageDeb(appDir); err != nil {
+				fatal("%v", err)
+			}
+			return
+		case "appdir":
+			if err := cmdPackageAppDir(appDir); err != nil {
+				fatal("%v", err)
+			}
+			return
+		}
 	}
 
 	// Resolve absolute paths early
@@ -332,7 +371,24 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
 	return os.WriteFile(dst, data, 0644)
+}
+
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		relPath, _ := filepath.Rel(src, path)
+		target := filepath.Join(dst, relPath)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		return copyFile(path, target)
+	})
 }
 
 func buildICO(pngPaths []string, outPath string) error {
