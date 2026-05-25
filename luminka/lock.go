@@ -69,55 +69,35 @@ func lockFilePath(root, name string) string {
 	return filepath.Join(root, fmt.Sprintf("%s.lock", name))
 }
 
+// acquireInstanceLock reads the lock file for an existing instance without creating one.
+// Lock file creation is deferred to writeInstanceRecord after the server port is known.
 func acquireInstanceLock(root, name string) (*lockState, error) {
 	path := lockFilePath(root, name)
-	pid := os.Getpid()
 
-	for {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err == nil {
-			if writeErr := json.NewEncoder(f).Encode(instanceRecord{PID: pid, Port: 0}); writeErr != nil {
-				_ = f.Close()
-				_ = os.Remove(path)
-				return nil, writeErr
-			}
-			if closeErr := f.Close(); closeErr != nil {
-				_ = os.Remove(path)
-				return nil, closeErr
-			}
-			return &lockState{path: path, record: instanceRecord{PID: pid, Port: 0}, owned: true}, nil
-		}
-		if !os.IsExist(err) {
-			return nil, err
-		}
-
-		record, readErr := readLockRecord(path)
-		if readErr != nil {
-			if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
-				return nil, readErr
-			}
-			continue
-		}
-
-		if processAlive(record.PID) {
-			if record.Port > 0 {
-				if localhostPortReachable(record.Port, 250*time.Millisecond) {
-					return &lockState{path: path, record: *record, reused: true}, nil
-				}
-				if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
-					return nil, removeErr
-				}
-				continue
-			}
-			if record.Port == 0 {
-				return &lockState{path: path, record: *record, reused: true}, nil
-			}
-		}
-
-		if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
-			return nil, removeErr
-		}
+	record, readErr := readLockRecord(path)
+	if readErr != nil {
+		// No valid lock exists — caller will create one after server starts.
+		return nil, nil
 	}
+
+	if !processAlive(record.PID) {
+		// Stale lock — remove and signal caller to create a new one.
+		_ = os.Remove(path)
+		return nil, nil
+	}
+
+	// Existing instance is alive.
+	if record.Port > 0 {
+		if localhostPortReachable(record.Port, 250*time.Millisecond) {
+			return &lockState{path: path, record: *record, reused: true}, nil
+		}
+		// Port is not reachable — stale lock (process alive but port dead).
+		_ = os.Remove(path)
+		return nil, nil
+	}
+
+	// Process alive but port not yet known (still starting up) — treat as existing.
+	return &lockState{path: path, record: *record, reused: true}, nil
 }
 
 func localhostPortReachable(port int, timeout time.Duration) bool {

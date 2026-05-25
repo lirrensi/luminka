@@ -57,6 +57,8 @@ type wsMessage struct {
 	Atime           string          `json:"atime,omitempty"`
 	Mtime           string          `json:"mtime,omitempty"`
 	Len             int64           `json:"len,omitempty"`
+	Offset          *int64          `json:"offset,omitempty"`
+	Length          *int64          `json:"length,omitempty"`
 	Stat            json.RawMessage `json:"stat,omitempty"`
 	HandleID        string          `json:"handle_id,omitempty"`
 }
@@ -112,6 +114,8 @@ func (m wsMessage) MarshalJSON() ([]byte, error) {
 		Atime           string           `json:"atime,omitempty"`
 		Mtime           string           `json:"mtime,omitempty"`
 		Len             int64            `json:"len,omitempty"`
+		Offset          *int64           `json:"offset,omitempty"`
+		Length          *int64           `json:"length,omitempty"`
 		Stat            json.RawMessage  `json:"stat,omitempty"`
 		HandleID        string           `json:"handle_id,omitempty"`
 	}
@@ -153,6 +157,8 @@ func (m wsMessage) MarshalJSON() ([]byte, error) {
 		Atime:           m.Atime,
 		Mtime:           m.Mtime,
 		Len:             m.Len,
+		Offset:          m.Offset,
+		Length:          m.Length,
 		Stat:            m.Stat,
 		HandleID:        m.HandleID,
 	}
@@ -192,6 +198,7 @@ func (rt *Runtime) serveWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	conn.SetReadLimit(128 * 1024 * 1024) // 128 MB
 
 	wsConn := rt.registerConnection(conn)
 	defer func() {

@@ -6,8 +6,6 @@
 
 package luminka
 
-import "fmt"
-
 func (rt *Runtime) handleBroadcastRequest(sender *wsConnection, request wsMessage, payload []byte) error {
 	if rt == nil {
 		return writeErrorResponse(sender, request.ID, "runtime is required")
@@ -20,17 +18,14 @@ func (rt *Runtime) handleBroadcastRequest(sender *wsConnection, request wsMessag
 		targets = rt.connectionSnapshotExcluding(sender)
 	}
 	message := wsMessage{Event: "broadcast", Channel: request.Channel, Data: request.Data, ContentType: request.ContentType}
+	// Iterate targets first and collect delivery errors.
 	var firstErr error
 	for _, target := range targets {
 		if err := writeWSFrame(target, message, payload); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
-	if err := writeWSMessage(sender, wsMessage{Event: "broadcast_response", ID: request.ID, Ok: boolPtr(true)}); err != nil {
-		return err
-	}
-	if firstErr != nil {
-		return fmt.Errorf("broadcast delivery failed: %w", firstErr)
-	}
-	return nil
+	// Then send response with appropriate ok status.
+	ok := firstErr == nil
+	return writeWSMessage(sender, wsMessage{Event: "broadcast_response", ID: request.ID, Ok: boolPtr(ok)})
 }

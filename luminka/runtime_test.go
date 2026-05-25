@@ -161,38 +161,27 @@ func TestRuntimeLaunchModeForHeadlessBrowserAndWebview(t *testing.T) {
 
 func TestAcquireInstanceLockCreatesFreshPIDZeroRecord(t *testing.T) {
 	root := t.TempDir()
+
+	// No lock file exists yet — acquireInstanceLock should return nil (no existing instance).
 	state, err := acquireInstanceLock(root, "runtime-lock-fresh")
 	if err != nil {
 		t.Fatalf("acquireInstanceLock() error = %v", err)
 	}
-	t.Cleanup(func() { _ = removeLockFile(state.path) })
-
-	if !state.owned || state.reused {
-		t.Fatalf("lock state = %#v, want owned fresh lock", state)
-	}
-	if state.record.PID != os.Getpid() {
-		t.Fatalf("pid = %d, want %d", state.record.PID, os.Getpid())
-	}
-	if state.record.Port != 0 {
-		t.Fatalf("port = %d, want 0", state.record.Port)
-	}
-
-	record, err := readLockRecord(state.path)
-	if err != nil {
-		t.Fatalf("readLockRecord() error = %v", err)
-	}
-	if record.PID != os.Getpid() || record.Port != 0 {
-		t.Fatalf("lock record = %#v, want current pid and port 0", record)
+	if state != nil {
+		t.Fatal("acquireInstanceLock() should return nil when no lock file exists")
 	}
 }
 
 func TestAcquireInstanceLockReusesLivePIDZeroRecord(t *testing.T) {
 	root := t.TempDir()
-	first, err := acquireInstanceLock(root, "runtime-lock-live")
-	if err != nil {
-		t.Fatalf("first acquireInstanceLock() error = %v", err)
+	path := lockFilePath(root, "runtime-lock-live")
+	pid := os.Getpid()
+
+	// Create a lock file with Port:0 (simulates old runtime that hasn't started the server yet).
+	if err := writeInstanceRecord(path, instanceRecord{PID: pid, Port: 0}); err != nil {
+		t.Fatalf("writeInstanceRecord() error = %v", err)
 	}
-	t.Cleanup(func() { _ = removeLockFile(first.path) })
+	t.Cleanup(func() { _ = removeLockFile(path) })
 
 	second, err := acquireInstanceLock(root, "runtime-lock-live")
 	if err != nil {
@@ -202,18 +191,18 @@ func TestAcquireInstanceLockReusesLivePIDZeroRecord(t *testing.T) {
 	if second == nil || !second.reused || second.owned {
 		t.Fatalf("second lock state = %#v, want reused live lock", second)
 	}
-	if second.record.PID != os.Getpid() {
-		t.Fatalf("pid = %d, want %d", second.record.PID, os.Getpid())
+	if second.record.PID != pid {
+		t.Fatalf("pid = %d, want %d", second.record.PID, pid)
 	}
 	if second.record.Port != 0 {
 		t.Fatalf("port = %d, want 0", second.record.Port)
 	}
 
-	record, err := readLockRecord(first.path)
+	record, err := readLockRecord(path)
 	if err != nil {
 		t.Fatalf("readLockRecord() error = %v", err)
 	}
-	if record.PID != os.Getpid() || record.Port != 0 {
+	if record.PID != pid || record.Port != 0 {
 		t.Fatalf("lock record = %#v, want current pid and port 0", record)
 	}
 }
@@ -234,21 +223,13 @@ func TestAcquireInstanceLockRecoversStalePIDZeroRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquireInstanceLock() error = %v", err)
 	}
-	t.Cleanup(func() { _ = removeLockFile(state.path) })
-
-	if !state.owned || state.reused {
-		t.Fatalf("lock state = %#v, want fresh owned lock after stale recovery", state)
-	}
-	if state.record.PID != os.Getpid() {
-		t.Fatalf("pid = %d, want %d", state.record.PID, os.Getpid())
+	if state != nil {
+		t.Fatal("acquireInstanceLock() should return nil (stale lock removed, no new lock created)")
 	}
 
-	record, err := readLockRecord(path)
-	if err != nil {
-		t.Fatalf("readLockRecord() error = %v", err)
-	}
-	if record.PID != os.Getpid() || record.Port != 0 {
-		t.Fatalf("lock record = %#v, want current pid and port 0", record)
+	// The stale lock should have been removed.
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("stale lock file was not removed")
 	}
 }
 
@@ -321,24 +302,13 @@ func TestAcquireInstanceLockRecoversStaleClosedPortRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquireInstanceLock() error = %v", err)
 	}
-	t.Cleanup(func() { _ = removeLockFile(state.path) })
-
-	if !state.owned || state.reused {
-		t.Fatalf("lock state = %#v, want fresh owned lock after closed-port recovery", state)
-	}
-	if state.record.PID != os.Getpid() {
-		t.Fatalf("pid = %d, want %d", state.record.PID, os.Getpid())
-	}
-	if state.record.Port != 0 {
-		t.Fatalf("port = %d, want 0", state.record.Port)
+	if state != nil {
+		t.Fatal("acquireInstanceLock() should return nil (stale lock removed, no new lock created)")
 	}
 
-	record, err := readLockRecord(path)
-	if err != nil {
-		t.Fatalf("readLockRecord() error = %v", err)
-	}
-	if record.PID != os.Getpid() || record.Port != 0 {
-		t.Fatalf("lock record = %#v, want current pid and port 0", record)
+	// The stale lock should have been removed.
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("stale lock file was not removed")
 	}
 }
 

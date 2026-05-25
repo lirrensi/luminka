@@ -31,6 +31,7 @@ type streamRegistry struct {
 }
 
 type streamState struct {
+	mu      sync.Mutex
 	id      string
 	kind    streamKind
 	conn    *wsConnection
@@ -118,6 +119,8 @@ func (s *streamState) acceptClientChunk(seq uint64) error {
 	if s == nil {
 		return errors.New("stream is required")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.closed {
 		return errors.New("stream is closed")
 	}
@@ -132,13 +135,16 @@ func (s *streamState) attachFile(file *os.File) {
 	if s == nil {
 		return
 	}
+	s.mu.Lock()
 	s.file = file
+	s.mu.Unlock()
 }
 
 func (s *streamState) closeResource() {
 	if s == nil || s.file == nil {
 		return
 	}
+	// closeResource must be called with s.mu held (by removeLocked).
 	_ = s.file.Close()
 	s.file = nil
 }
@@ -198,8 +204,12 @@ func (sr *streamRegistry) removeLocked(id string) {
 	if !ok {
 		return
 	}
+	// Lock per-stream mutex while mutating state and closing the file handle.
+	// Lock ordering: sr.mu → state.mu (never invert this).
+	state.mu.Lock()
 	state.closed = true
 	state.closeResource()
+	state.mu.Unlock()
 	delete(sr.streams, id)
 	if ids := sr.byConnection[state.conn]; ids != nil {
 		delete(ids, id)
@@ -209,8 +219,8 @@ func (sr *streamRegistry) removeLocked(id string) {
 	}
 }
 
-func writeStreamChunk(conn *wsConnection, streamID string, seq uint64, lane string, payload []byte, eof bool) error {
-	return writeWSFrame(conn, wsMessage{Event: "stream_chunk", StreamID: streamID, Seq: seq, Lane: lane, EOF: eof}, payload)
+func writeStreamChunk(conn *wsConnection, streamID string, seq uint64, lane string, payload []byte, eof bool, id json.RawMessage) error {
+	return writeWSFrame(conn, wsMessage{Event: "stream_chunk", StreamID: streamID, Seq: seq, Lane: lane, EOF: eof, ID: id}, payload)
 }
 
 func writeStreamClose(conn *wsConnection, id json.RawMessage, streamID string, ok bool, code *int, errMsg string) error {

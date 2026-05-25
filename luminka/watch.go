@@ -7,6 +7,8 @@
 package luminka
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -165,11 +167,11 @@ func (w *Watcher) Start() {
 						return
 					}
 					w.handleFSEvent(event)
-				case _, ok := <-fsw.Errors:
-					if !ok {
-						return
-					}
-					// fsnotify errors are silently ignored (plan says log if logging exists).
+			case err, ok := <-fsw.Errors:
+				if !ok {
+					return
+				}
+				fmt.Fprintf(os.Stderr, "[luminka] fsnotify error: %v\n", err)
 				}
 			}
 		}()
@@ -232,15 +234,6 @@ func (w *Watcher) handleFSEvent(event fsnotify.Event) {
 		return
 	}
 
-	w.mu.Lock()
-	_, isWatched := w.watched[relPath]
-	_, isPolled := w.polled[relPath]
-	w.mu.Unlock()
-
-	if !isWatched || isPolled {
-		return
-	}
-
 	// Verify the modification time actually changed.
 	modTime, exists, err := currentPathModTime(w.root, relPath)
 	if err != nil || !exists {
@@ -248,6 +241,12 @@ func (w *Watcher) handleFSEvent(event fsnotify.Event) {
 	}
 
 	w.mu.Lock()
+	_, isWatched := w.watched[relPath]
+	_, isPolled := w.polled[relPath]
+	if !isWatched || isPolled {
+		w.mu.Unlock()
+		return
+	}
 	last, hasLast := w.lastSeen[relPath]
 	changed := !hasLast || !last.Equal(modTime)
 	if changed {

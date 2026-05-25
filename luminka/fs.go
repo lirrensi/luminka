@@ -29,6 +29,16 @@ func NewFSBridge(root string) *FSBridge {
 	if eval, err := filepath.EvalSymlinks(resolved); err == nil {
 		resolved = eval
 	}
+	// If symlink resolution leads outside the original path, the bridge still uses
+	// the resolved path (it is the canonical location). The sanitize() check prevents
+	// path traversal at each operation. Log a warning if the resolved path escapes.
+	absOriginal, absErr := filepath.Abs(root)
+	if absErr == nil {
+		absResolved, _ := filepath.Abs(resolved)
+		if !strings.HasPrefix(absResolved, absOriginal) && absResolved != absOriginal {
+			fmt.Fprintf(os.Stderr, "[luminka] warning: configured root resolves outside original path: %s → %s\n", root, resolved)
+		}
+	}
 	return &FSBridge{root: resolved}
 }
 
@@ -272,14 +282,24 @@ func (fsb *FSBridge) Cp(src, dst string, recursive bool) error {
 			if d.IsDir() {
 				return os.MkdirAll(target, 0o755)
 			}
-			return copyFileContent(path, target)
+			if err := copyFileContent(path, target); err != nil {
+				// Clean up partially-written destination file on failure
+				os.Remove(target)
+				return fmt.Errorf("copy %s → %s: %w", path, target, err)
+			}
+			return nil
 		})
 	}
 
 	if err := os.MkdirAll(filepath.Dir(dstResolved), 0o755); err != nil {
 		return err
 	}
-	return copyFileContent(srcResolved, dstResolved)
+	if err := copyFileContent(srcResolved, dstResolved); err != nil {
+		// Clean up partially-written destination file on failure
+		os.Remove(dstResolved)
+		return fmt.Errorf("copy %s → %s: %w", src, dst, err)
+	}
+	return nil
 }
 
 func (fsb *FSBridge) Remove(path string) error {
@@ -413,6 +433,9 @@ func (fsb *FSBridge) Open(path string, flags int, perm os.FileMode) (*os.File, e
 	return os.OpenFile(resolved, flags, perm)
 }
 
+// normalizeRelativePath converts a relative path to a clean internal form.
+// Convention: "." becomes "" (empty string = root directory).
+// Callers must handle the empty-string case when joining with the root path.
 func normalizeRelativePath(path string) (string, error) {
 	if filepath.IsAbs(path) {
 		return "", errors.New("absolute paths are not allowed")

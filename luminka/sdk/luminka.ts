@@ -6,6 +6,12 @@
 
 const DEFAULT_WS_PATH = "/ws";
 const DEFAULT_CHUNK_SIZE = 32 * 1024;
+
+// File access mode constants (Node.js fs.constants compatibility)
+export const F_OK = 0;
+export const R_OK = 4;
+export const W_OK = 2;
+export const X_OK = 1;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -27,6 +33,7 @@ export interface LuminkaAppInfo {
 
 export interface LuminkaOptions {
   url?: string;
+  requestTimeout?: number; // milliseconds (default 30000)
 }
 
 export interface LuminkaFrame {
@@ -254,6 +261,16 @@ export class LuminkaClient {
 
   constructor(private readonly options: LuminkaOptions = {}) {}
 
+  /**
+   * Connect to the Luminka runtime.
+   *
+   * Reconnection model: if the connection drops, the SDK waits for a new
+   * connection to be established. Pending requests on the old connection are
+   * rejected. The new connection starts fresh — stream handles, watchers,
+   * and exec sessions from the old connection must be re-established.
+   * The SDK abstracts this away so callers don't need to handle reconnection
+   * logic explicitly.
+   */
   async connect(): Promise<void> {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       return;
@@ -300,9 +317,11 @@ export class LuminkaClient {
     socket.addEventListener("message", (event) => this.handleMessage(event));
     socket.addEventListener("close", () => {
       if (this.socket === socket) {
+        // This close event is for the current socket
         this.socket = null;
+        this.failAll(new Error("Luminka connection closed"));
       }
-      this.failAll(new Error("Luminka connection closed"));
+      // Stale close event from a previous socket — ignore entirely
     });
     return this.connectPromise;
   }
@@ -371,7 +390,8 @@ export class LuminkaClient {
         if (state.closed) {
           throw new Error(`stream ${streamId} is closed`);
         }
-        await this.sendFrame({ event: "stream_chunk", stream_id: streamId, seq: state.nextSeq++, eof: false }, toUint8Array(chunk));
+        await this.sendFrame({ event: "stream_chunk", stream_id: streamId, seq: state.nextSeq, eof: false }, toUint8Array(chunk));
+        state.nextSeq++;
       },
       close: async () => {
         if (state.closed) {
@@ -419,6 +439,10 @@ export class LuminkaClient {
     if (!response.ok) throw this.responseError(response);
   }
 
+  /**
+   * Append data to a file. For files larger than 128 MB, use `createWriteStream()` instead.
+   * Maximum single-message payload: 128 MB (server-enforced).
+   */
   async appendFile(path: string, data: string | Uint8Array): Promise<void> {
     const bytes = typeof data === "string" ? textEncoder.encode(data) : data;
     await this.request({ event: "fs_append_file", path }, bytes);
@@ -442,7 +466,7 @@ export class LuminkaClient {
   }
 
   async link(existingPath: string, newPath: string): Promise<void> {
-    await this.request({ event: "fs_link", src: existingPath, path: newPath });
+    await this.request({ event: "fs_link", src: existingPath, dest: newPath });
   }
 
   async lstat(path: string): Promise<StatResult> {
@@ -547,6 +571,10 @@ export class LuminkaClient {
     await this.request({ event: "fs_utimes", path, atime: atimeStr, mtime: mtimeStr });
   }
 
+  /**
+   * Write file contents. For files larger than 128 MB, use `createWriteStream()` instead.
+   * Maximum single-message payload: 128 MB (server-enforced).
+   */
   async writeFile(path: string, data: string | Uint8Array): Promise<void> {
     const bytes = typeof data === "string" ? textEncoder.encode(data) : data;
     await this.request({ event: "fs_write_file", path }, bytes);
@@ -693,18 +721,29 @@ export class LuminkaClient {
     const id = this.nextId();
     const frame = encodeLuminkaFrame({ ...payload, id }, requestPayload);
     return new Promise<LuminkaFrame>((resolve, reject) => {
+      const timeout = this.options.requestTimeout ?? 30000;
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`request ${payload.event} timed out after ${timeout}ms`));
+      }, timeout);
+
       this.pending.set(id, {
         resolve: (header, responsePayload) => {
+          clearTimeout(timer);
           if (responsePayload && responsePayload.byteLength > 0) {
             (header as Record<string, unknown>)._payload = responsePayload;
           }
           resolve(header);
         },
-        reject,
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
       });
       try {
         socket.send(frame);
       } catch (error) {
+        clearTimeout(timer);
         this.pending.delete(id);
         reject(toError(error, "failed to send Luminka request"));
       }
@@ -749,10 +788,12 @@ export class LuminkaClient {
 
     if (message.header.event === "stream_close") {
       this.handleStreamClose(message.header);
+      return;
     }
 
     if (message.header.event === "script_response" || message.header.event === "shell_response") {
       this.handleExecResponse(message.header);
+      return;
     }
 
     const id = message.header.id;
@@ -790,7 +831,7 @@ export class LuminkaClient {
     if (!header.stream_id) {
       return;
     }
-    const stream = this.streams.get(header.stream_id) ?? this.bindPendingExecStream(header.stream_id);
+    const stream = this.streams.get(header.stream_id) ?? this.bindPendingExecStream(header.stream_id, header.id);
     if (!stream) {
       return;
     }
@@ -872,6 +913,11 @@ export class LuminkaClient {
       this.pendingExecStreams.delete(header.id);
     }
     stream.closed = true;
+    // Flush any remaining partial UTF-8 bytes from the stream decoder
+    const flushedStdout = textDecoder.decode();
+    if (flushedStdout) {
+      stream.stdoutText += flushedStdout;
+    }
     stream.completed.resolve({
       code: typeof header.code === "number" ? header.code : null,
       stdout: stream.stdoutText,
@@ -933,15 +979,25 @@ export class LuminkaClient {
     }
   }
 
-  private bindPendingExecStream(streamId: string): ExecStreamState | null {
+  private bindPendingExecStream(streamId: string, requestId?: string): ExecStreamState | null {
     if (this.streams.has(streamId)) {
       return this.streams.get(streamId) as ExecStreamState;
     }
-    const pending = this.pendingExecStreams.values().next();
-    if (pending.done) {
+    let stream: ExecStreamState | undefined;
+    if (requestId) {
+      // Look up by request_id in the chunk (preferred path)
+      stream = this.pendingExecStreams.get(requestId);
+    }
+    if (!stream) {
+      // Fallback for old runtime (no request_id in chunks): use insertion order
+      const firstEntry = this.pendingExecStreams.entries().next();
+      if (!firstEntry.done) {
+        stream = firstEntry.value[1];
+      }
+    }
+    if (!stream) {
       return null;
     }
-    const stream = pending.value;
     if (stream.streamId && stream.streamId !== streamId) {
       return null;
     }
@@ -1277,8 +1333,8 @@ class LuminkaFileHandle implements FileHandle {
     const response = await this.client.request({
       event: "handle_read",
       stream_id: this.handleId,
-      len: options?.position ?? 0,
-      perm: options?.length ?? 0,
+      offset: options?.position,  // undefined (omit) = current position, number = explicit offset
+      length: options?.length,    // undefined (omit) = read all, number = read N bytes
     });
     const payload = (response as Record<string, unknown>)._payload as Uint8Array | undefined;
     return payload ?? new Uint8Array();
@@ -1287,7 +1343,7 @@ class LuminkaFileHandle implements FileHandle {
   async write(data: Uint8Array, position?: number): Promise<void> {
     this.assertOpen();
     await this.client.request(
-      { event: "handle_write", stream_id: this.handleId, len: position ?? 0 },
+      { event: "handle_write", stream_id: this.handleId, offset: position },  // undefined (omit) = append, number = WriteAt
       data,
     );
   }
@@ -1392,6 +1448,14 @@ class LuminkaFileHandle implements FileHandle {
     });
   }
 
+  /**
+   * Read all lines from the file as an async generator.
+   * Uses TextDecoder internally for encoding support.
+   * @param options - Read options
+   * @param options.encoding - Text encoding (passed to TextDecoder, default "utf-8").
+   *   Supported encodings: "utf-8", "utf-16le", "latin1", etc.
+   *   See TextDecoder documentation for the full list.
+   */
   async *readLines(options?: { encoding?: string }): AsyncGenerator<string, void, void> {
     this.assertOpen();
     let buffer = "";
@@ -1400,9 +1464,10 @@ class LuminkaFileHandle implements FileHandle {
       const chunk = await this.read({ length: DEFAULT_CHUNK_SIZE });
       if (chunk.byteLength === 0) break;
       buffer += decoder.decode(chunk, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
+      const rawLines = buffer.split("\n");
+      buffer = rawLines.pop() ?? "";
+      for (const rawLine of rawLines) {
+        const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
         yield line;
       }
     }

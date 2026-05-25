@@ -7,6 +7,7 @@
 package luminka
 
 import (
+	"encoding/json"
 	"io"
 	"os/exec"
 	"sync"
@@ -15,12 +16,13 @@ import (
 type execStreamWriter struct {
 	conn     *wsConnection
 	streamID string
+	id       json.RawMessage // request_id to include in each chunk
 	mu       sync.Mutex
 	seq      uint64
 }
 
-func newExecStreamWriter(conn *wsConnection, streamID string) *execStreamWriter {
-	return &execStreamWriter{conn: conn, streamID: streamID}
+func newExecStreamWriter(conn *wsConnection, streamID string, id json.RawMessage) *execStreamWriter {
+	return &execStreamWriter{conn: conn, streamID: streamID, id: id}
 }
 
 func (w *execStreamWriter) writeChunk(lane string, payload []byte, eof bool) error {
@@ -31,7 +33,7 @@ func (w *execStreamWriter) writeChunk(lane string, payload []byte, eof bool) err
 	seq := w.seq
 	w.seq++
 	w.mu.Unlock()
-	return writeStreamChunk(w.conn, w.streamID, seq, lane, payload, eof)
+	return writeStreamChunk(w.conn, w.streamID, seq, lane, payload, eof, w.id)
 }
 
 func pumpReaderToStream(r io.Reader, lane string, writer *execStreamWriter, errCh chan<- error, wg *sync.WaitGroup) {

@@ -562,7 +562,7 @@ func TestStreamRegistryConcurrentMixedOperations(t *testing.T) {
 
 func TestWriteStreamHelpersNilConn(t *testing.T) {
 	// These should not panic — they return errors via writeWSFrame/writeWSMessage nil checks
-	_ = writeStreamChunk(nil, "s1", 0, "stdout", []byte("hello"), false)
+	_ = writeStreamChunk(nil, "s1", 0, "stdout", []byte("hello"), false, nil)
 	_ = writeStreamClose(nil, nil, "s1", true, nil, "")
 }
 

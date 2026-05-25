@@ -9,6 +9,7 @@ package luminka
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 
 	"github.com/gorilla/websocket"
 )
@@ -21,15 +22,27 @@ func readWSFrame(conn *wsConnection) (int, wsMessage, []byte, error) {
 	if err != nil {
 		return 0, wsMessage{}, nil, err
 	}
-	if msgType != websocket.BinaryMessage {
+	switch msgType {
+	case websocket.BinaryMessage:
+		// Normal binary frame — parse as Luminka protocol
+		var request wsMessage
+		payload, err := decodeFrame(data, &request)
+		if err != nil {
+			return msgType, wsMessage{}, nil, err
+		}
+		return msgType, request, payload, nil
+	case websocket.CloseMessage:
+		return msgType, wsMessage{}, nil, io.EOF
+	case websocket.PingMessage:
+		// Auto-respond with Pong and skip silently
+		if pingConn, ok := conn.conn.(*websocket.Conn); ok {
+			_ = pingConn.WriteMessage(websocket.PongMessage, nil)
+		}
+		return msgType, wsMessage{}, nil, nil
+	default:
+		// TextMessage or other — return the raw frame for the caller to reject
 		return msgType, wsMessage{}, nil, nil
 	}
-	var request wsMessage
-	payload, err := decodeFrame(data, &request)
-	if err != nil {
-		return msgType, wsMessage{}, nil, err
-	}
-	return msgType, request, payload, nil
 }
 
 func writeWSMessage(conn *wsConnection, message wsMessage) error {

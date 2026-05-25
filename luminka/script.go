@@ -166,7 +166,7 @@ func (sb *ScriptBridge) ExecStream(rt *Runtime, conn *wsConnection, id json.RawM
 	}
 	defer rt.streams.remove(stream.id)
 
-	writer := newExecStreamWriter(conn, stream.id)
+	writer := newExecStreamWriter(conn, stream.id, id)
 	var wg sync.WaitGroup
 	errCh := make(chan error, 2)
 	wg.Add(2)

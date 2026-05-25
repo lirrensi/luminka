@@ -149,14 +149,15 @@ func Run(cfg Config) (err error) {
 	if err = startServer(rt); err != nil {
 		return err
 	}
+	rt.ownedLock = true
+	if err = writeInstanceRecord(rt.LockPath, instanceRecord{PID: rt.PID, Port: rt.Port, Mode: rt.Mode}); err != nil {
+		return err
+	}
 	rt.logEvent("startup", map[string]any{
 		"port": rt.Port,
 		"mode": rt.Mode,
 		"root": rt.Root,
 	})
-	if err = writeInstanceRecord(rt.LockPath, instanceRecord{PID: rt.PID, Port: rt.Port, Mode: rt.Mode}); err != nil {
-		return err
-	}
 
 	switch runtimeLaunchModeFor(rt) {
 	case runtimeLaunchHeadless:
@@ -232,10 +233,11 @@ func prepareRuntime(cfg Config) (*Runtime, *lockState, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if state.reused {
+	if state != nil && state.reused {
 		return nil, state, nil
 	}
 
+	lockPath := lockFilePath(root, cfg.Name)
 	rt := &Runtime{
 		Name:            cfg.Name,
 		AppVersion:      cfg.AppVersion,
@@ -254,9 +256,8 @@ func prepareRuntime(cfg Config) (*Runtime, *lockState, error) {
 		Assets:          cfg.Assets,
 		ScriptAssets:    cfg.ScriptAssets,
 		Port:            cfg.Port,
-		LockPath:        state.path,
-		PID:             state.record.PID,
-		ownedLock:       state.owned,
+		LockPath:        lockPath,
+		PID:             os.Getpid(),
 		connections:     make(map[*wsConnection]struct{}),
 		streams:         newStreamRegistry(),
 		shutdownCh:      make(chan struct{}),
