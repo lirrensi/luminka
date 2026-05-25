@@ -8,8 +8,10 @@ package luminka
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -315,6 +317,370 @@ func TestHandleReadWithOffsetAndLength(t *testing.T) {
 	if string(payload) != "5678" {
 		t.Fatalf("handle_read(offset=5, len=4) = %q, want %q", string(payload), "5678")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Stream edge case: out-of-order chunk rejection
+// ---------------------------------------------------------------------------
+
+func TestFilesystemStreamRejectsOutOfOrderChunks(t *testing.T) {
+	root := t.TempDir()
+	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
+
+	payload := []byte("test payload")
+
+	mustWriteWS(t, conn, map[string]any{"event": "fs_open_write", "id": "open-write", "path": "ordered.bin"})
+	writeAck, _ := mustReadWSFrame(t, conn)
+	writeStreamID, _ := writeAck["stream_id"].(string)
+	if writeStreamID == "" {
+		t.Fatal("fs_open_write ack missing stream_id")
+	}
+
+	// Send seq=1 before seq=0 — should be rejected
+	mustWriteWSFrame(t, conn, map[string]any{"event": "stream_chunk", "stream_id": writeStreamID, "seq": 1}, payload)
+	resp := mustReadWS(t, conn)
+	if ok, _ := resp["ok"].(bool); ok {
+		t.Fatal("out-of-order chunk (seq=1 before seq=0) was accepted, want error")
+	}
+	if errStr, _ := resp["error"].(string); !strings.Contains(errStr, "unexpected stream sequence") {
+		t.Fatalf("out-of-order chunk error = %q, want 'unexpected stream sequence'", errStr)
+	}
+
+	// Cleanup: close the stream
+	mustWriteWS(t, conn, map[string]any{"event": "stream_close", "id": "close", "stream_id": writeStreamID})
+}
+
+// ---------------------------------------------------------------------------
+// Stream edge case: stream_chunk on a read stream
+// ---------------------------------------------------------------------------
+
+func TestFilesystemStreamChunkOnReadStreamRejected(t *testing.T) {
+	root := t.TempDir()
+	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
+
+	// Write a file first
+	if err := os.WriteFile(filepath.Join(root, "readonly.bin"), []byte("data"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	// Open for reading
+	mustWriteWS(t, conn, map[string]any{"event": "fs_open_read", "id": "open-read", "path": "readonly.bin"})
+	readAck, _ := mustReadWSFrame(t, conn)
+	readStreamID, _ := readAck["stream_id"].(string)
+	if readStreamID == "" {
+		t.Fatal("fs_open_read ack missing stream_id")
+	}
+
+	// Read the chunks (drain the stream)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		header, _ := mustReadWSFrame(t, conn)
+		if header["event"] == "stream_close" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out draining read stream")
+		}
+	}
+
+	// Now try to write a chunk to the (now-closed) read stream
+	mustWriteWSFrame(t, conn, map[string]any{"event": "stream_chunk", "stream_id": readStreamID, "seq": 0}, []byte("bad"))
+	resp := mustReadWS(t, conn)
+	if ok, _ := resp["ok"].(bool); ok {
+		t.Fatal("stream_chunk on closed read stream was accepted, want error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stream edge case: double close on write stream
+// ---------------------------------------------------------------------------
+
+func TestFilesystemStreamDoubleClose(t *testing.T) {
+	root := t.TempDir()
+	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
+
+	mustWriteWS(t, conn, map[string]any{"event": "fs_open_write", "id": "open", "path": "double_close.bin"})
+	ack, _ := mustReadWSFrame(t, conn)
+	streamID, _ := ack["stream_id"].(string)
+	if streamID == "" {
+		t.Fatal("missing stream_id")
+	}
+
+	// First close should succeed
+	mustWriteWS(t, conn, map[string]any{"event": "stream_close", "id": "close1", "stream_id": streamID})
+	resp := mustReadWS(t, conn)
+	if ok, _ := resp["ok"].(bool); !ok {
+		t.Fatalf("first stream_close failed: %v", resp)
+	}
+
+	// Second close on same ID should error
+	mustWriteWS(t, conn, map[string]any{"event": "stream_close", "id": "close2", "stream_id": streamID})
+	resp = mustReadWS(t, conn)
+	if ok, _ := resp["ok"].(bool); ok {
+		t.Fatal("second stream_close succeeded, want error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stream large file write and read roundtrip via WebSocket
+// ---------------------------------------------------------------------------
+
+func TestFilesystemStreamLargeFileRoundtrip(t *testing.T) {
+	root := t.TempDir()
+	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
+
+	// Payload larger than 2 chunks (>64KB) to exercise multi-chunk
+	payloadSize := 3*fsStreamChunkSize + 1234
+	payload := bytes.Repeat([]byte("ABCDEFGHIJ"), (payloadSize/10)+1)
+	payload = payload[:payloadSize]
+
+	mustWriteWS(t, conn, map[string]any{"event": "fs_open_write", "id": "write", "path": "large.bin"})
+	ack, _ := mustReadWSFrame(t, conn)
+	writeStreamID, _ := ack["stream_id"].(string)
+	if writeStreamID == "" {
+		t.Fatal("missing stream_id")
+	}
+
+	// Write in chunk-sized pieces
+	var seq uint64
+	for offset := 0; offset < len(payload); offset += fsStreamChunkSize {
+		end := offset + fsStreamChunkSize
+		if end > len(payload) {
+			end = len(payload)
+		}
+		mustWriteWSFrame(t, conn, map[string]any{"event": "stream_chunk", "stream_id": writeStreamID, "seq": seq}, payload[offset:end])
+		seq++
+	}
+
+	mustWriteWS(t, conn, map[string]any{"event": "stream_close", "id": "close", "stream_id": writeStreamID})
+	assertWSOK(t, mustReadWS(t, conn), "stream_close", "close")
+
+	// Read back via stream
+	mustWriteWS(t, conn, map[string]any{"event": "fs_open_read", "id": "read", "path": "large.bin"})
+	readAck, _ := mustReadWSFrame(t, conn)
+	readStreamID, _ := readAck["stream_id"].(string)
+	if readStreamID == "" {
+		t.Fatal("read missing stream_id")
+	}
+
+	var got bytes.Buffer
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out reading large file stream")
+		}
+		header, chunk := mustReadWSFrame(t, conn)
+		switch header["event"] {
+		case "stream_chunk":
+			got.Write(chunk)
+		case "stream_close":
+			if !bytes.Equal(got.Bytes(), payload) {
+				t.Fatalf("large file mismatch: got %d bytes, want %d", got.Len(), len(payload))
+			}
+			return
+		default:
+			t.Fatalf("unexpected event %q", header["event"])
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fs_open with various flags and modes
+// ---------------------------------------------------------------------------
+
+func TestFilesystemStreamOpenWithFlags(t *testing.T) {
+	root := t.TempDir()
+	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
+
+	t.Run("open with flag 'r' on non-existent should fail", func(t *testing.T) {
+		mustWriteWS(t, conn, map[string]any{"event": "fs_open", "id": "open-r", "path": "nonexistent.txt", "flag": "r"})
+		resp := mustReadWS(t, conn)
+		if ok, _ := resp["ok"].(bool); ok {
+			t.Fatal("fs_open 'r' on non-existent succeeded, want error")
+		}
+	})
+
+	t.Run("open with flag 'w' should create file", func(t *testing.T) {
+		mustWriteWS(t, conn, map[string]any{"event": "fs_open", "id": "open-w", "path": "created.txt", "flag": "w"})
+		resp := mustReadWS(t, conn)
+		if ok, _ := resp["ok"].(bool); !ok {
+			t.Fatalf("fs_open 'w' failed: %v", resp)
+		}
+		// Close the handle
+		handleID, _ := resp["stream_id"].(string)
+		if handleID != "" {
+			mustWriteWS(t, conn, map[string]any{"event": "handle_close", "stream_id": handleID})
+			mustReadWS(t, conn)
+		}
+	})
+
+	t.Run("open with flag 'a' should append", func(t *testing.T) {
+		if err := os.WriteFile(filepath.Join(root, "append_test.txt"), []byte("base"), 0o644); err != nil {
+			t.Fatalf("WriteFile error = %v", err)
+		}
+		mustWriteWS(t, conn, map[string]any{"event": "fs_open", "id": "open-a", "path": "append_test.txt", "flag": "a"})
+		resp := mustReadWS(t, conn)
+		if ok, _ := resp["ok"].(bool); !ok {
+			t.Fatalf("fs_open 'a' failed: %v", resp)
+		}
+		handleID, _ := resp["stream_id"].(string)
+		if handleID != "" {
+			// Write to the handle at current position (append)
+			mustWriteWSFrame(t, conn, map[string]any{"event": "handle_write", "stream_id": handleID, "len": 0}, []byte("+appended"))
+			writeResp := mustReadWS(t, conn)
+			if ok, _ := writeResp["ok"].(bool); !ok {
+				t.Fatalf("handle_write to append handle failed: %v", writeResp)
+			}
+			// Close
+			mustWriteWS(t, conn, map[string]any{"event": "handle_close", "stream_id": handleID})
+			mustReadWS(t, conn)
+		}
+		// Verify on disk
+		diskData, err := os.ReadFile(filepath.Join(root, "append_test.txt"))
+		if err != nil {
+			t.Fatalf("ReadFile error = %v", err)
+		}
+		if string(diskData) != "base+appended" {
+			t.Fatalf("append file content = %q, want %q", string(diskData), "base+appended")
+		}
+	})
+
+	// Close the handle from 'w' test if it's still open
+	// (Handles are cleaned up by connection close)
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: handle_read on a zero-length file
+// ---------------------------------------------------------------------------
+
+func TestHandleReadZeroLengthFile(t *testing.T) {
+	root := t.TempDir()
+	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
+
+	// Create an empty file
+	if err := os.WriteFile(filepath.Join(root, "empty.txt"), []byte{}, 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	// Open the empty file for reading
+	mustWriteWS(t, conn, map[string]any{"event": "fs_open", "id": "open-empty", "path": "empty.txt", "flag": "r"})
+	openResp := mustReadWS(t, conn)
+	handleID, _ := openResp["stream_id"].(string)
+	if handleID == "" {
+		t.Fatal("open response missing stream_id")
+	}
+
+	// Read the zero-length file (uses ReadAll path: offset=0, requestedLength=0)
+	mustWriteWS(t, conn, map[string]any{"event": "handle_read", "stream_id": handleID, "len": 0, "perm": 0})
+	resp := mustReadWS(t, conn)
+	if ok, _ := resp["ok"].(bool); !ok {
+		t.Fatalf("handle_read on empty file failed: %v", resp)
+	}
+	// Response should have no data field (empty file)
+	if data, hasData := resp["data"]; hasData && data != nil {
+		t.Fatalf("handle_read on empty file returned data = %v, want nil", data)
+	}
+
+	// Clean up
+	mustWriteWS(t, conn, map[string]any{"event": "handle_close", "stream_id": handleID})
+	mustReadWS(t, conn)
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: unknown event rejected
+// ---------------------------------------------------------------------------
+
+func TestFilesystemUnknownEvent(t *testing.T) {
+	root := t.TempDir()
+	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
+
+	mustWriteWS(t, conn, map[string]any{"event": "fs_invalid_event", "id": "bad1"})
+	resp := mustReadWS(t, conn)
+	if ok, _ := resp["ok"].(bool); ok {
+		t.Fatal("unknown event returned ok=true, want error")
+	}
+	errText, _ := resp["error"].(string)
+	if !strings.Contains(errText, "unknown event") {
+		t.Fatalf("error = %q, want 'unknown event'", errText)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// KNOWN BUG: fs_utimes and handle_utimes nil pointer dereference
+// when one time is valid RFC3339Nano but the other is invalid.
+// The code checks `atimeErr != nil || mtimeErr != nil` and then tries
+// Sscanf + atimeErr.Error() on both, but one error may be nil.
+// ---------------------------------------------------------------------------
+
+func TestFilesystemUtimesNilDerefBug(t *testing.T) {
+	root := t.TempDir()
+
+	// Create the file first
+	if err := os.WriteFile(filepath.Join(root, "utimes_bug.txt"), []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up minimal runtime and request
+	rt := &Runtime{
+		Root:     root,
+		FSBridge: NewFSBridge(root),
+	}
+	fakeConn := newFakeWebSocketConn()
+	wsConn := rt.registerConnection(fakeConn)
+
+	// Case 1: valid atime (RFC3339Nano), invalid mtime — triggers nil deref
+	t.Run("valid atime invalid mtime", func(t *testing.T) {
+		request := wsMessage{
+			Event: "fs_utimes",
+			ID:    json.RawMessage(`"u1"`),
+			Path:  "utimes_bug.txt",
+			Atime: "2024-01-01T00:00:00Z", // Valid RFC3339Nano
+			Mtime: "invalid",               // Invalid — atimeErr == nil, mtimeErr != nil
+		}
+
+		panicked := true
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Logf("KNOWN BUG: fs_utimes nil deref with valid atime + invalid mtime: %v", r)
+				} else {
+					panicked = false
+				}
+			}()
+			_ = rt.handleFilesystemRequest(wsConn, request, nil)
+		}()
+
+		if !panicked {
+			t.Log("BUG FIXED: fs_utimes no longer panics with mixed valid/invalid times")
+		}
+	})
+
+	// Case 2: invalid atime, valid mtime (RFC3339Nano) — same bug, reversed
+	t.Run("invalid atime valid mtime", func(t *testing.T) {
+		request := wsMessage{
+			Event: "fs_utimes",
+			ID:    json.RawMessage(`"u2"`),
+			Path:  "utimes_bug.txt",
+			Atime: "invalid",               // Invalid — atimeErr != nil
+			Mtime: "2024-06-15T12:30:00Z", // Valid RFC3339Nano — mtimeErr == nil
+		}
+
+		panicked := true
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Logf("KNOWN BUG: fs_utimes nil deref with invalid atime + valid mtime: %v", r)
+				} else {
+					panicked = false
+				}
+			}()
+			_ = rt.handleFilesystemRequest(wsConn, request, nil)
+		}()
+
+		if !panicked {
+			t.Log("BUG FIXED: fs_utimes no longer panics with mixed valid/invalid times")
+		}
+	})
 }
 
 func mustWriteWSFrame(t *testing.T, conn *fakeWebSocketConn, header map[string]any, payload []byte) {

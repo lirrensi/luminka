@@ -54,3 +54,6 @@ starter/build/
 starter/winres/icon*.png
 starter/winres/winres.json
 docs/CODEMAP.*.md
+
+
+.agents/
