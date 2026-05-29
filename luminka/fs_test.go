@@ -1441,21 +1441,17 @@ func TestFSBridgeCopyFileSameSourceAndDestination(t *testing.T) {
 		t.Fatalf("Write error = %v", err)
 	}
 
-	// KNOWN BUG: CopyFile to itself truncates the source before reading,
-	// resulting in data loss (empty file). This is a data-loss vulnerability.
-	// Ideally, CopyFile should detect src==dst and return an error or be a no-op.
+	// CopyFile with src==dst should be a safe no-op (no data loss)
 	err := fsb.CopyFile("file.txt", "file.txt")
-	if err == nil {
-		data, readErr := fsb.Read("file.txt")
-		if readErr != nil {
-			t.Fatalf("Read after self-copy error = %v", readErr)
-		}
-		// Currently produces empty file — confirmed data-loss bug.
-		// This assertion documents the existing behavior.
-		if data == "" {
-			t.Log("KNOWN BUG: CopyFile to itself causes data loss (empty file)")
-			// Don't fail — we're documenting a known issue
-		}
+	if err != nil {
+		t.Fatalf("CopyFile on same file should succeed (no-op), got error = %v", err)
+	}
+	data, readErr := fsb.Read("file.txt")
+	if readErr != nil {
+		t.Fatalf("Read after self-copy error = %v", readErr)
+	}
+	if data != content {
+		t.Fatalf("CopyFile to itself caused data loss: got %q, want %q", data, content)
 	}
 }
 
@@ -1507,11 +1503,14 @@ func TestFSBridgeAppendFileToNestedNonExistentDir(t *testing.T) {
 	root := t.TempDir()
 	fsb := NewFSBridge(root)
 
-	// AppendFile to a file in a non-existent subdirectory should fail
-	// because MkdirAll is NOT called before the append (unlike WriteBytes)
+	// AppendFile should create parent directories (consistent with WriteBytes)
 	err := fsb.AppendFile(filepath.Join("nonexistent", "log.txt"), []byte("data"))
-	if err == nil {
-		t.Fatal("AppendFile to nested non-existent dir succeeded, want error")
+	if err != nil {
+		t.Fatalf("AppendFile should create parent dirs automatically: %v", err)
+	}
+	exists, _ := fsb.Exists(filepath.Join("nonexistent", "log.txt"))
+	if !exists {
+		t.Fatal("AppendFile reported success but file doesn't exist")
 	}
 }
 
@@ -1743,21 +1742,28 @@ func TestFSBridgeCpRecursiveSymlinkFileEscape(t *testing.T) {
 	// copyFileContent reads through the symlink to the outside file.
 	err := fsb.Cp("srcdir", "dstdir", true)
 	if err != nil {
-		t.Logf("Cp rejected symlink escape (good): %v", err)
-		return
+		t.Fatalf("Cp should succeed (symlinks are preserved, not followed): %v", err)
 	}
 
-	// KNOWN SECURITY BUG: Cp recursive DOES follow symlinks and copies files
-	// from outside the root. The destination contains the secret data.
-	dstPath := filepath.Join("dstdir", "leak.link")
-	dstContent, readErr := os.ReadFile(filepath.Join(root, dstPath))
-	if readErr == nil {
-		if string(dstContent) == "SECRET_DATA" {
-			t.Log("KNOWN SECURITY BUG: Cp recursive followed symlink outside root — data exfiltrated")
-			// Document the breach but don't fail — this is a known issue
+	// Cp recursive should preserve symlinks instead of following them.
+	// The destination should contain a symlink with the same target, not the file content.
+	dstLink := filepath.Join("dstdir", "leak.link")
+	dstLinkInfo, statErr := os.Lstat(filepath.Join(root, dstLink))
+	if statErr != nil {
+		t.Fatalf("Lstat on destination symlink error = %v", statErr)
+	}
+	if dstLinkInfo.Mode()&os.ModeSymlink == 0 {
+		// If it's not a symlink, the content was copied (security breach)
+		dstContent, readErr := os.ReadFile(filepath.Join(root, dstLink))
+		if readErr == nil && string(dstContent) == "SECRET_DATA" {
+			t.Fatal("SECURITY: Cp recursive followed symlink and copied outside data")
 		}
-	} else {
-		t.Log("Cp recursive did not copy the symlink (platform may not support symlinks in this context)")
+	}
+	// Verify the destination symlink points to the same target
+	dstTarget, _ := os.Readlink(filepath.Join(root, dstLink))
+	srcTarget, _ := os.Readlink(linkPath)
+	if dstTarget != srcTarget {
+		t.Fatalf("destination symlink points to %q, want %q", dstTarget, srcTarget)
 	}
 }
 
@@ -2068,28 +2074,24 @@ func TestFSBridgeListNonExistent(t *testing.T) {
 // Cp circular copy guard: dst inside src should be prevented
 // ---------------------------------------------------------------------------
 
-func TestFSBridgeCpCircularCopyGuardMissing(t *testing.T) {
-	// KNOWN MISSING GUARD: Cp recursive does not detect when dst is inside src.
-	// This can cause infinite recursion (creating nested dstdir/srcdir/dstdir/...)
-	// until the OS path length limit is hit or disk space is exhausted.
-	//
-	// We do NOT run Cp here because it would create infinite directory nesting.
-	// Instead, we verify that filepath.Rel COULD detect this case,
-	// which is what a fix would use.
-	srcAbs := `C:\app\srcdir`
-	dstAbs := `C:\app\srcdir\dstdir`
-	rel, err := filepath.Rel(srcAbs, dstAbs)
-	if err != nil {
-		t.Fatalf("Rel error = %v", err)
+func TestFSBridgeCpCircularCopyGuard(t *testing.T) {
+	root := t.TempDir()
+	fsb := NewFSBridge(root)
+
+	// Create source directory with a file
+	if err := os.MkdirAll(filepath.Join(root, "srcdir"), 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
 	}
-	// If rel starts with "..", dst is OUTSIDE src (safe).
-	// Otherwise, dst is INSIDE src (circular copy risk).
-	if !strings.HasPrefix(rel, "..") {
-		t.Log("Cp circular copy guard is MISSING — dst inside src would cause infinite recursion")
-		t.Logf("  src=%q dst=%q rel=%q", "srcdir", "srcdir/dstdir", rel)
-	} else {
-		t.Log("dst is outside src (safe)")
+	if err := os.WriteFile(filepath.Join(root, "srcdir", "file.txt"), []byte("content"), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
 	}
+
+	// Try copying srcdir into srcdir/dstdir (dst inside src — circular)
+	err := fsb.Cp("srcdir", filepath.Join("srcdir", "dstdir"), true)
+	if err == nil {
+		t.Fatal("Cp recursive should reject destination inside source (circular copy), got nil")
+	}
+	t.Logf("Cp correctly rejected circular copy: %v", err)
 }
 
 // ---------------------------------------------------------------------------
@@ -2111,19 +2113,18 @@ func TestFSBridgeDeleteOnSymlinkToDirectory(t *testing.T) {
 		t.Skipf("symlink not supported: %v", err)
 	}
 
-	// KNOWN BUG: Delete uses os.Stat (follows symlinks), which sees a directory
-	// and rejects the deletion. But os.Remove on a symlink would work fine.
-	// A symlink is a file-like entry, not a directory.
+	// Delete should use Lstat to detect symlinks and remove them regardless of target
 	err := fsb.Delete("link_to_dir")
-	if err == nil {
-		t.Log("Delete on symlink to directory succeeded")
-		// Clean up the symlink manually
-		os.Remove(linkPath)
-	} else {
-		// Current behavior: Delete rejects because Stat follows the symlink
-		// and reports IsDir()=true
-		t.Logf("KNOWN BUG: Delete on symlink-to-dir rejected: %v", err)
-		t.Log("Should use Lstat instead of Stat to distinguish symlinks from directories")
+	if err != nil {
+		t.Fatalf("Delete on symlink to directory should succeed: %v", err)
+	}
+	// Verify the symlink was removed (not the target directory)
+	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
+		t.Fatalf("symlink should be removed, but Lstat error = %v", err)
+	}
+	// Verify the target directory still exists
+	if _, err := os.Stat(filepath.Join(root, "realdir")); err != nil {
+		t.Fatalf("target directory should still exist after symlink deletion: %v", err)
 	}
 }
 
@@ -2140,16 +2141,14 @@ func TestFSBridgeAppendFileVsWriteBytesDirCreation(t *testing.T) {
 		t.Fatalf("WriteBytes nested dir creation error = %v", err)
 	}
 
-	// AppendFile does NOT create parent dirs — this is inconsistent
+	// AppendFile should create parent dirs like WriteBytes
 	err := fsb.AppendFile(filepath.Join("x", "y", "z", "append.txt"), []byte("append"))
-	if err == nil {
-		t.Log("AppendFile created parent dirs (unexpected — matched WriteBytes behavior)")
-		exists, _ := fsb.Exists(filepath.Join("x", "y", "z", "append.txt"))
-		if !exists {
-			t.Fatal("AppendFile reported success but file doesn't exist")
-		}
-	} else {
-		t.Logf("AppendFile did not create parent dirs (inconsistent with WriteBytes): %v", err)
+	if err != nil {
+		t.Fatalf("AppendFile with nested directories should succeed: %v", err)
+	}
+	exists, _ := fsb.Exists(filepath.Join("x", "y", "z", "append.txt"))
+	if !exists {
+		t.Fatal("AppendFile reported success but file doesn't exist")
 	}
 }
 
@@ -2203,7 +2202,7 @@ func TestFSBridgeManyConcurrentOperations(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// RemoveAll on symlink pointing to directory outside root
+// RemoveAll on symlink — must not follow symlink outside root
 // ---------------------------------------------------------------------------
 
 func TestFSBridgeRemoveAllOnOutsideSymlink(t *testing.T) {
@@ -2223,16 +2222,24 @@ func TestFSBridgeRemoveAllOnOutsideSymlink(t *testing.T) {
 		t.Skipf("symlink not supported: %v", err)
 	}
 
-	// RemoveAll on symlink to outside dir
-	// symlink is within root, so sanitize succeeds (symlink itself is within root)
-	// But os.RemoveAll follows the symlink and removes outside content
+	// RemoveAll on symlink to outside dir — sanitize rejects the outside path
+	// (EvalSymlinks resolves the link, finds it's outside root).
+	// This is safe behavior: the symlink entry inside root is preserved,
+	// but so are the outside files. The symlink is intentionally not removable
+	// through the bridge to prevent confusion about what "remove" means for
+	// links pointing outside the sandbox.
 	err := fsb.RemoveAll("outside_link")
 	if err != nil {
-		t.Logf("RemoveAll on outside symlink rejected: %v", err)
+		t.Logf("RemoveAll on outside symlink safely rejected: %v", err)
+		// Verify outside files are untouched
+		_, statErr := os.Stat(outsideFile)
+		if os.IsNotExist(statErr) {
+			t.Fatal("outside file was deleted despite the error")
+		}
 	} else {
-		// Check if the outside directory was affected
-		_, err := os.Stat(outsideFile)
-		if os.IsNotExist(err) {
+		// Symlink entry was removed — verify outside files are untouched
+		_, statErr := os.Stat(outsideFile)
+		if os.IsNotExist(statErr) {
 			t.Fatal("RemoveAll followed symlink and deleted files outside root")
 		}
 		t.Log("RemoveAll on symlink did not delete outside files (safe)")

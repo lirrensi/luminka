@@ -134,6 +134,20 @@ func (fsb *FSBridge) List(path string) ([]string, error) {
 }
 
 func (fsb *FSBridge) Delete(path string) error {
+	// Check if the path is a symlink before sanitize resolves it.
+	// Sanitize uses EvalSymlinks which follows symlinks to their target,
+	// making it impossible to detect them afterward.
+	cleanPath, normErr := normalizeRelativePath(path)
+	if normErr != nil {
+		return normErr
+	}
+	preResolved := filepath.Join(fsb.root, cleanPath)
+	if lstatInfo, lerr := os.Lstat(preResolved); lerr == nil && lstatInfo.Mode()&os.ModeSymlink != 0 {
+		// Symlinks are file-like entries regardless of their target
+		return os.Remove(preResolved)
+	}
+
+	// Not a symlink — use normal sanitize + directory check
 	resolved, err := fsb.sanitize(path)
 	if err != nil {
 		return err
@@ -230,6 +244,9 @@ func (fsb *FSBridge) CopyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
+	if srcResolved == dstResolved {
+		return nil // no-op: source and destination are the same file
+	}
 	return copyFileContent(srcResolved, dstResolved)
 }
 
@@ -261,6 +278,12 @@ func (fsb *FSBridge) Cp(src, dst string, recursive bool) error {
 		return err
 	}
 
+	// Circular copy guard: prevent copying a directory into itself
+	if strings.HasPrefix(dstResolved+string(filepath.Separator), srcResolved+string(filepath.Separator)) ||
+		dstResolved == srcResolved {
+		return fmt.Errorf("cannot copy %q to %q: destination is inside source", src, dst)
+	}
+
 	srcInfo, err := os.Stat(srcResolved)
 	if err != nil {
 		return err
@@ -281,6 +304,14 @@ func (fsb *FSBridge) Cp(src, dst string, recursive bool) error {
 			target := filepath.Join(dstResolved, rel)
 			if d.IsDir() {
 				return os.MkdirAll(target, 0o755)
+			}
+			// Preserve symlinks instead of following them (security: no data exfiltration)
+			if d.Type()&os.ModeSymlink != 0 {
+				linkTarget, linkErr := os.Readlink(path)
+				if linkErr != nil {
+					return linkErr
+				}
+				return os.Symlink(linkTarget, target)
 			}
 			if err := copyFileContent(path, target); err != nil {
 				// Clean up partially-written destination file on failure
@@ -311,6 +342,18 @@ func (fsb *FSBridge) Remove(path string) error {
 }
 
 func (fsb *FSBridge) RemoveAll(path string) error {
+	// Check for symlinks before sanitize resolves them.
+	// Sanitize uses EvalSymlinks which follows symlinks, causing path-escape
+	// errors for symlinks pointing outside root.
+	cleanPath, normErr := normalizeRelativePath(path)
+	if normErr != nil {
+		return normErr
+	}
+	preResolved := filepath.Join(fsb.root, cleanPath)
+	if lstatInfo, lerr := os.Lstat(preResolved); lerr == nil && lstatInfo.Mode()&os.ModeSymlink != 0 {
+		// Remove the symlink entry itself, not the target
+		return os.Remove(preResolved)
+	}
 	resolved, err := fsb.sanitize(path)
 	if err != nil {
 		return err
@@ -412,6 +455,9 @@ func (fsb *FSBridge) Link(oldPath, newPath string) error {
 func (fsb *FSBridge) AppendFile(path string, data []byte) error {
 	resolved, err := fsb.sanitize(path)
 	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
 		return err
 	}
 	f, err := os.OpenFile(resolved, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)

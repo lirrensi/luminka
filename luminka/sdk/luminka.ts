@@ -75,6 +75,8 @@ export interface LuminkaFrame {
   perm?: number;
   atime?: string;
   mtime?: string;
+  offset?: number;
+  length?: number;
   len?: number;
   stat?: {
     size: number;
@@ -359,13 +361,13 @@ export class LuminkaClient {
 
     const id = this.nextId();
     const frame = encodeLuminkaFrame({ event: "ws:auth", data: nonce, id });
-    socket.send(frame);
+    socket.send(frame as any);
 
     await new Promise<void>((resolve, reject) => {
       const timeout = this.options.requestTimeout ?? 30000;
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error("ws_auth timed out"));
+        reject(new Error("ws:auth timed out"));
       }, timeout);
       this.pending.set(id, {
         resolve: (header) => {
@@ -795,7 +797,7 @@ export class LuminkaClient {
     }
     this.customEventListeners.get(event)!.add(listener);
     return () => {
-      this.customEventListeners.get(event)?.delete(listener);
+      this.customEventListeners?.get(event)?.delete(listener);
     };
   }
 
@@ -806,7 +808,7 @@ export class LuminkaClient {
     const state = this.createExecStreamState(requestId, payload.event);
     this.pendingExecStreams.set(requestId, state);
     try {
-      socket.send(encodeLuminkaFrame({ ...payload, id: requestId }));
+      socket.send(encodeLuminkaFrame({ ...payload, id: requestId }) as any);
     } catch (error) {
       this.pendingExecStreams.delete(requestId);
       this.streams.delete(requestId);
@@ -863,7 +865,7 @@ export class LuminkaClient {
     return execState;
   }
 
-  private async request(payload: Omit<LuminkaFrame, "id">, requestPayload: Uint8Array = new Uint8Array()): Promise<LuminkaFrame> {
+  /** @internal */ public async request(payload: Omit<LuminkaFrame, "id">, requestPayload: Uint8Array = new Uint8Array()): Promise<LuminkaFrame> {
     await this.connect();
     const socket = this.requireSocket();
     const id = this.nextId();
@@ -879,7 +881,7 @@ export class LuminkaClient {
         resolve: (header, responsePayload) => {
           clearTimeout(timer);
           if (responsePayload && responsePayload.byteLength > 0) {
-            (header as Record<string, unknown>)._payload = responsePayload;
+            (header as any)._payload = responsePayload;
           }
           resolve(header);
         },
@@ -889,7 +891,7 @@ export class LuminkaClient {
         },
       });
       try {
-        socket.send(frame);
+        socket.send(frame as any);
       } catch (error) {
         clearTimeout(timer);
         this.pending.delete(id);
@@ -900,7 +902,7 @@ export class LuminkaClient {
 
   private async sendFrame(header: LuminkaFrame, payload: Uint8Array = new Uint8Array()): Promise<void> {
     const socket = this.requireSocket();
-    socket.send(encodeLuminkaFrame(header, payload));
+    socket.send(encodeLuminkaFrame(header, payload) as any);
   }
 
   private handleMessage(event: MessageEvent): void {
@@ -1500,7 +1502,7 @@ class LuminkaFileHandle implements FileHandle {
       offset: options?.position,  // undefined (omit) = current position, number = explicit offset
       length: options?.length,    // undefined (omit) = read all, number = read N bytes
     });
-    const payload = (response as Record<string, unknown>)._payload as Uint8Array | undefined;
+    const payload = (response as any)._payload as Uint8Array | undefined;
     return payload ?? new Uint8Array();
   }
 
