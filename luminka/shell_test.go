@@ -21,7 +21,7 @@ func TestShellBridgeExecStreamStreamsStdout(t *testing.T) {
 	sb := &ShellBridge{root: root, defaultTimeout: time.Second}
 	rt := &Runtime{streams: newStreamRegistry()}
 	conn := newFakeWebSocketConn()
-	wsConn := &wsConnection{conn: conn}
+	wsConn := &WSConnection{conn: conn}
 
 	cmd, args, want := shellEchoCommand("shell-ok")
 	if err := sb.ExecStream(rt, wsConn, json.RawMessage(`"h1"`), cmd, args, 0); err != nil {
@@ -32,13 +32,13 @@ func TestShellBridgeExecStreamStreamsStdout(t *testing.T) {
 	for {
 		header, payload := mustReadWSFrame(t, conn)
 		switch header["event"] {
-		case "stream_chunk":
+		case "stream:chunk":
 			if lane, _ := header["lane"].(string); lane != "stdout" {
 				t.Fatalf("lane = %q, want stdout", lane)
 			}
 			stdout.Write(payload)
-		case "shell_response":
-			assertWSOK(t, header, "shell_response", "h1")
+		case "response:shell:exec":
+			assertWSOK(t, header, "response:shell:exec", "h1")
 			if code, _ := header["code"].(float64); code != 0 {
 				t.Fatalf("code = %v, want 0", header["code"])
 			}
@@ -57,7 +57,7 @@ func TestShellBridgeExecStreamReportsNonZeroExitCode(t *testing.T) {
 	sb := &ShellBridge{root: root, defaultTimeout: time.Second}
 	rt := &Runtime{streams: newStreamRegistry()}
 	conn := newFakeWebSocketConn()
-	wsConn := &wsConnection{conn: conn}
+	wsConn := &WSConnection{conn: conn}
 
 	cmd, args := shellExitCommand()
 	if err := sb.ExecStream(rt, wsConn, json.RawMessage(`"h2"`), cmd, args, 0); err != nil {
@@ -67,9 +67,9 @@ func TestShellBridgeExecStreamReportsNonZeroExitCode(t *testing.T) {
 	for {
 		header, _ := mustReadWSFrame(t, conn)
 		switch header["event"] {
-		case "stream_chunk":
+		case "stream:chunk":
 			// drain stdout/stderr chunks
-		case "shell_response":
+		case "response:shell:exec":
 			if ok, _ := header["ok"].(bool); ok {
 				t.Fatal("shell_response ok = true, want false for non-zero exit")
 			}

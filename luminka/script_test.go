@@ -87,7 +87,7 @@ func TestScriptBridgeExecStreamStreamsStdout(t *testing.T) {
 	sb := &ScriptBridge{root: root, defaultTimeout: time.Second}
 	rt := &Runtime{streams: newStreamRegistry()}
 	conn := newFakeWebSocketConn()
-	wsConn := &wsConnection{conn: conn}
+	wsConn := &WSConnection{conn: conn}
 
 	if err := sb.ExecStream(rt, wsConn, json.RawMessage(`"s1"`), runner, "external.txt", nil, 0); err != nil {
 		t.Fatalf("ExecStream() error = %v", err)
@@ -97,13 +97,13 @@ func TestScriptBridgeExecStreamStreamsStdout(t *testing.T) {
 	for {
 		header, payload := mustReadWSFrame(t, conn)
 		switch header["event"] {
-		case "stream_chunk":
+		case "stream:chunk":
 			if lane, _ := header["lane"].(string); lane != "stdout" {
 				t.Fatalf("lane = %q, want stdout", lane)
 			}
 			stdout.Write(payload)
-		case "script_response":
-			assertWSOK(t, header, "script_response", "s1")
+		case "response:script:exec":
+			assertWSOK(t, header, "response:script:exec", "s1")
 			if code, _ := header["code"].(float64); code != 0 {
 				t.Fatalf("code = %v, want 0", header["code"])
 			}
@@ -130,7 +130,7 @@ func TestScriptBridgeExecStreamReportsNonZeroExitCode(t *testing.T) {
 	sb := &ScriptBridge{root: root, defaultTimeout: time.Second}
 	rt := &Runtime{streams: newStreamRegistry()}
 	conn := newFakeWebSocketConn()
-	wsConn := &wsConnection{conn: conn}
+	wsConn := &WSConnection{conn: conn}
 
 	if err := sb.ExecStream(rt, wsConn, json.RawMessage(`"s2"`), runner, "external.txt", nil, 0); err != nil {
 		t.Fatalf("ExecStream() error = %v", err)
@@ -139,9 +139,9 @@ func TestScriptBridgeExecStreamReportsNonZeroExitCode(t *testing.T) {
 	for {
 		header, _ := mustReadWSFrame(t, conn)
 		switch header["event"] {
-		case "stream_chunk":
+		case "stream:chunk":
 			// keep draining until final response
-		case "script_response":
+		case "response:script:exec":
 			if ok, _ := header["ok"].(bool); ok {
 				t.Fatal("script_response ok = true, want false for non-zero exit")
 			}

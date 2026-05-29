@@ -14,14 +14,14 @@ import (
 )
 
 type execStreamWriter struct {
-	conn     *wsConnection
+	conn     *WSConnection
 	streamID string
 	id       json.RawMessage // request_id to include in each chunk
 	mu       sync.Mutex
 	seq      uint64
 }
 
-func newExecStreamWriter(conn *wsConnection, streamID string, id json.RawMessage) *execStreamWriter {
+func newExecStreamWriter(conn *WSConnection, streamID string, id json.RawMessage) *execStreamWriter {
 	return &execStreamWriter{conn: conn, streamID: streamID, id: id}
 }
 

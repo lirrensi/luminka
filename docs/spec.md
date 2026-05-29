@@ -162,8 +162,8 @@ If a runtime does not claim support for a capability, calls to that capability M
 
 In particular:
 
-- `script_exec` MUST NOT degrade into `shell_exec`,
-- `shell_exec` MUST NOT degrade into `script_exec`,
+- `script:exec` MUST NOT degrade into `shell:exec`,
+- `shell:exec` MUST NOT degrade into `script:exec`,
 - disabled filesystem APIs MUST NOT remain reachable.
 
 ## Behavioral Specification
@@ -312,19 +312,19 @@ The payload bytes of a frame MUST be interpreted according to the JSON header.
 
 ### 10. Runtime Introspection
 
-The runtime MUST support `app_info`.
+The runtime MUST support `app:info`.
 
 Request header:
 
 ```json
-{ "event": "app_info", "id": "a1" }
+{ "event": "app:info", "id": "a1" }
 ```
 
 Response header:
 
 ```json
 {
-  "event": "app_info",
+  "event": "response:app:info",
   "id": "a1",
   "ok": true,
   "name": "<app_name>",
@@ -352,42 +352,42 @@ The runtime MUST support the following path-based operations when filesystem cap
 
 | Request event | Response event | Behavior |
 |---|---|---|
-| `fs_access` | `fs_response` | Check accessibility of a path |
-| `fs_append_file` | `fs_response` | Append data to a file |
-| `fs_chmod` | `fs_response` | Change permissions of a path |
-| `fs_copy_file` | `fs_response` | Copy a file from src to dest |
-| `fs_link` | `fs_response` | Create a hard link |
-| `fs_lstat` | `fs_response` | Get metadata without following symlinks |
-| `fs_mkdir` | `fs_response` | Create a directory |
-| `fs_mkdtemp` | `fs_response` | Create a temporary directory |
-| `fs_open` | `fs_response` | Open a FileHandle for read/write |
-| `fs_read_file` | `fs_response` | Read a file's contents |
-| `fs_readdir` | `fs_response` | Read directory entries |
-| `fs_readlink` | `fs_response` | Read a symlink's target |
-| `fs_realpath` | `fs_response` | Resolve a path to its canonical absolute path |
-| `fs_rename` | `fs_response` | Rename or move a file or directory |
-| `fs_rm` | `fs_response` | Remove a file or directory (recursive when requested) |
-| `fs_rmdir` | `fs_response` | Remove an empty directory |
-| `fs_stat` | `fs_response` | Get file or directory metadata |
-| `fs_symlink` | `fs_response` | Create a symbolic link |
-| `fs_truncate` | `fs_response` | Truncate or extend a file |
-| `fs_unlink` | `fs_response` | Remove a file (unlink) |
-| `fs_utimes` | `fs_response` | Change file timestamps |
-| `fs_write_file` | `fs_response` | Write data to a file |
-| `fs_watch` | `fs_response` | Register a watched path |
-| `fs_unwatch` | `fs_response` | Remove a watched path |
+| `file:access` | `response:file:access` | Check accessibility of a path |
+| `file:append_file` | `response:file:append_file` | Append data to a file |
+| `file:chmod` | `response:file:chmod` | Change permissions of a path |
+| `file:copy_file` | `response:file:copy_file` | Copy a file from src to dest |
+| `file:link` | `response:file:link` | Create a hard link |
+| `file:lstat` | `response:file:lstat` | Get metadata without following symlinks |
+| `file:mkdir` | `response:file:mkdir` | Create a directory |
+| `file:mkdtemp` | `response:file:mkdtemp` | Create a temporary directory |
+| `file:open` | `response:file:open` | Open a FileHandle for read/write |
+| `file:read_file` | `response:file:read_file` | Read a file's contents |
+| `file:readdir` | `response:file:readdir` | Read directory entries |
+| `file:readlink` | `response:file:readlink` | Read a symlink's target |
+| `file:realpath` | `response:file:realpath` | Resolve a path to its canonical absolute path |
+| `file:rename` | `response:file:rename` | Rename or move a file or directory |
+| `file:rm` | `response:file:rm` | Remove a file or directory (recursive when requested) |
+| `file:rmdir` | `response:file:rmdir` | Remove an empty directory |
+| `file:stat` | `response:file:stat` | Get file or directory metadata |
+| `file:symlink` | `response:file:symlink` | Create a symbolic link |
+| `file:truncate` | `response:file:truncate` | Truncate or extend a file |
+| `file:unlink` | `response:file:unlink` | Remove a file (unlink) |
+| `file:utimes` | `response:file:utimes` | Change file timestamps |
+| `file:write_file` | `response:file:write_file` | Write data to a file |
+| `file:watch` | `response:file:watch` | Register a watched path |
+| `file:unwatch` | `response:file:unwatch` | Remove a watched path |
 
 For backward compatibility, the runtime SHOULD also support the following legacy event names, which map to the corresponding Node-style operations:
 
 | Legacy event | Maps to | Notes |
 |---|---|---|
-| `fs_read_text` | `fs_read_file` | Returns decoded string |
-| `fs_write_text` | `fs_write_file` | Accepts string data |
-| `fs_list` | `fs_readdir` | Returns file names only (with `"/"` suffix for directories) |
-| `fs_delete` | `fs_unlink` | Files only; directories rejected |
-| `fs_exists` | `fs_access` | Returns boolean |
-| `fs_open_read` | `fs_open` | Opens read-only stream |
-| `fs_open_write` | `fs_open` | Opens write-only stream |
+| `file:read_text` | `file:read_file` | Returns decoded string |
+| `file:write_text` | `file:write_file` | Accepts string data |
+| `file:list` | `file:readdir` | Returns file names only (with `"/"` suffix for directories) |
+| `file:delete` | `file:unlink` | Files only; directories rejected |
+| `file:exists` | `file:access` | Returns boolean |
+| `file:open_read` | `file:open` | Opens read-only stream |
+| `file:open_write` | `file:open` | Opens write-only stream |
 
 Paths MUST be interpreted relative to the resolved app root.
 
@@ -403,44 +403,44 @@ Chunked filesystem transfer MUST be supported from the start. A conforming imple
 
 #### 11.2 Response shapes
 
-All filesystem responses use the response event `fs_response`. A successful response includes `"ok": true`. A failed response includes `"ok": false` and an `"error"` message.
+All filesystem responses use the response event named after the request event (e.g., `response:file:read_file`). A successful response includes `"ok": true`. A failed response includes `"ok": false` and an `"error"` message.
 
 Operation-specific fields in successful responses:
 
 | Operation | Response fields |
 |---|---|
-| `fs_read_file` | `data` (payload bytes or text) |
-| `fs_stat`, `fs_lstat` | `stat` (JSON object with `size`, `mode`, `mod_time`, `is_dir`, `is_symlink`) |
-| `fs_readdir` | `files` (string array of names), `file_types` (parallel array: `"file"`, `"directory"`, `"symlink"`) |
-| `fs_readlink` | `data` (target path string) |
-| `fs_realpath` | `data` (resolved path string) |
-| `fs_mkdtemp` | `data` (created path string) |
-| `fs_open` | `handle_id` (string, reuses the `stream_id` field) |
-| `fs_access` | `ok: true` on success, error on failure |
-| `fs_exists` (legacy) | `exists` (boolean) |
+| `file:read_file` | `data` (payload bytes or text) |
+| `file:stat`, `file:lstat` | `stat` (JSON object with `size`, `mode`, `mod_time`, `is_dir`, `is_symlink`) |
+| `file:readdir` | `files` (string array of names), `file_types` (parallel array: `"file"`, `"directory"`, `"symlink"`) |
+| `file:readlink` | `data` (target path string) |
+| `file:realpath` | `data` (resolved path string) |
+| `file:mkdtemp` | `data` (created path string) |
+| `file:open` | `handle_id` (string, reuses the `stream_id` field) |
+| `file:access` | `ok: true` on success, error on failure |
+| `file:exists` (legacy) | `exists` (boolean) |
 
 #### 11.3 Example
 
 Request:
 ```json
-{ "event": "fs_read_file", "id": "f1", "path": "data.yaml" }
+{ "event": "file:read_file", "id": "f1", "path": "data.yaml" }
 ```
 
 Success response:
 ```json
-{ "event": "fs_response", "id": "f1", "ok": true }
+{ "event": "response:file:read_file", "id": "f1", "ok": true }
 // followed by payload bytes when the response carries file data
 ```
 
 Stat request:
 ```json
-{ "event": "fs_stat", "id": "f2", "path": "config.json" }
+{ "event": "file:stat", "id": "f2", "path": "config.json" }
 ```
 
 Stat response:
 ```json
 {
-  "event": "fs_response",
+  "event": "response:file:stat",
   "id": "f2",
   "ok": true,
   "stat": {
@@ -453,7 +453,7 @@ Stat response:
 }
 ```
 
-If filesystem capability is disabled, any `fs_*` call MUST fail explicitly.
+If filesystem capability is disabled, any `file:*` call MUST fail explicitly.
 
 ### 12. FileHandle Operations
 
@@ -463,21 +463,21 @@ The runtime MUST support the following handle operations:
 
 | Request event | Response event | Behavior |
 |---|---|---|
-| `handle_read` | stream chunks | Read from the handle at a position |
-| `handle_write` | stream chunks | Write to the handle at a position |
-| `handle_close` | `fs_response` | Close the handle |
-| `handle_stat` | `fs_response` | Get metadata for the open file |
-| `handle_truncate` | `fs_response` | Truncate the open file |
-| `handle_sync` | `fs_response` | Flush buffered data to disk |
-| `handle_datasync` | `fs_response` | Flush data without metadata |
+| `handle:read` | stream chunks | Read from the handle at a position |
+| `handle:write` | stream chunks | Write to the handle at a position |
+| `handle:close` | `response:handle:close` | Close the handle |
+| `handle:stat` | `response:handle:stat` | Get metadata for the open file |
+| `handle:truncate` | `response:handle:truncate` | Truncate the open file |
+| `handle:sync` | `response:handle:sync` | Flush buffered data to disk |
+| `handle:datasync` | `response:handle:datasync` | Flush data without metadata |
 
 Each handle operation includes a `handle_id` field (mapped to the `stream_id` wire field) identifying which open handle to act on.
 
-The runtime MUST close the underlying OS file handle when `handle_close` is received.
+The runtime MUST close the underlying OS file handle when `handle:close` is received.
 
-The runtime SHOULD also clean up any handle whose owning WebSocket connection closes, regardless of whether `handle_close` was explicitly called.
+The runtime SHOULD also clean up any handle whose owning WebSocket connection closes, regardless of whether `handle:close` was explicitly called.
 
-Request fields for `handle_read`:
+Request fields for `handle:read`:
 - `handle_id` (string): the handle to read from
 - `offset` (number): byte position to read from
 - `length` (number): number of bytes to read (optional; runtime-defined default)
@@ -494,7 +494,7 @@ If filesystem capability is enabled and a path is being watched, the runtime MUS
 Notification header:
 
 ```json
-{ "event": "fs_changed", "path": "data.yaml" }
+{ "event": "file:changed", "path": "data.yaml" }
 ```
 
 The implementation MAY use polling or native OS file watching. The observable contract is the notification, not the detection strategy.
@@ -507,7 +507,7 @@ The watching contract SHOULD support both file and directory paths. When a direc
 
 A conforming product implementation SHOULD provide a higher-level SDK helper for text files that supports the common local-first pattern of loading a file, saving new text to that file, and subscribing to meaningful external content changes.
 
-The helper is layered on top of the filesystem capability. It does not change the raw `fs_watch` or `fs_changed` transport contract.
+The helper is layered on top of the filesystem capability. It does not change the raw `file:watch` or `file:changed` transport contract.
 
 The helper SHOULD expose operations equivalent to:
 
@@ -531,13 +531,13 @@ The helper MAY expose raw watch events separately for advanced callers, but raw 
 
 Luminka MAY support a runtime-local broadcast primitive for connected frontend clients.
 
-If broadcast support is implemented, the runtime MUST accept a `broadcast` request containing a channel name, arbitrary JSON metadata, and optional payload bytes.
+If broadcast support is implemented, the runtime MUST accept a `ws:broadcast` request containing a channel name, arbitrary JSON metadata, and optional payload bytes.
 
 Example request header:
 
 ```json
 {
-  "event": "broadcast",
+  "event": "ws:broadcast",
   "id": "b1",
   "channel": "workspace",
   "data": { "type": "active-session", "session_id": "tab-1" }
@@ -547,14 +547,14 @@ Example request header:
 Successful response header:
 
 ```json
-{ "event": "broadcast_response", "id": "b1", "ok": true }
+{ "event": "response:ws:broadcast", "id": "b1", "ok": true }
 ```
 
 Server-pushed broadcast header:
 
 ```json
 {
-  "event": "broadcast",
+  "event": "ws:broadcast",
   "channel": "workspace",
   "data": { "type": "active-session", "session_id": "tab-1" }
 }
@@ -610,7 +610,7 @@ Synchronous request header:
 
 ```json
 {
-  "event": "script_exec",
+  "event": "script:exec",
   "id": "s1",
   "runner": "python",
   "file": "tools/generate.py",
@@ -639,7 +639,7 @@ Synchronous response header:
 
 ```json
 {
-  "event": "script_response",
+  "event": "response:script:exec",
   "id": "s1",
   "ok": true,
   "stdout": "generated 42 files\n",
@@ -658,19 +658,19 @@ General stdin streaming is not required in v1 of this stream model.
 
 If the selected external script is missing from the allowed root, or the selected internal script is missing from the embedded bundle, the runtime MUST reject the request.
 
-If script capability is disabled, `script_exec` MUST fail explicitly.
+If script capability is disabled, `script:exec` MUST fail explicitly.
 
 ### 18. Shell Execution Capability
 
 If shell capability is enabled, the runtime MUST support synchronous execution and MAY additionally support stream-mode execution.
 
-`shell_exec` is the unrestricted execution lane.
+`shell:exec` is the unrestricted execution lane.
 
 Synchronous request header:
 
 ```json
 {
-  "event": "shell_exec",
+  "event": "shell:exec",
   "id": "h1",
   "cmd": "powershell",
   "args": ["-Command", "Get-Process | Select -First 5"],
@@ -688,7 +688,7 @@ Synchronous response header:
 
 ```json
 {
-  "event": "shell_response",
+  "event": "response:shell:exec",
   "id": "h1",
   "ok": true,
   "stdout": "...",
@@ -705,7 +705,7 @@ If stream execution is supported for shell commands, the runtime MUST:
 
 General stdin streaming is not required in v1 of this stream model.
 
-If shell capability is disabled, `shell_exec` MUST fail explicitly.
+If shell capability is disabled, `shell:exec` MUST fail explicitly.
 
 ### 19. Idle and Shutdown Behavior
 
@@ -826,11 +826,11 @@ The mechanism is:
 
 1. The runtime generates a random nonce before the WebView window opens.
 2. The runtime loads the WebView with the nonce as a query parameter: `http://127.0.0.1:{port}?t={nonce}`.
-3. The frontend SDK reads the nonce from the URL and sends it as the first WebSocket message (`ws_auth`) over the transport.
+3. The frontend SDK reads the nonce from the URL and sends it as the first WebSocket message (`ws:auth`) over the transport.
 4. The runtime verifies the nonce against the generated value.
 5. Only after successful verification are subsequent messages on that connection processed.
 
-The runtime MUST reject any WebSocket message other than `ws_auth` from a webview connection that has not yet authenticated.
+The runtime MUST reject any WebSocket message other than `ws:auth` from a webview connection that has not yet authenticated.
 
 The runtime MUST use a cryptographically random nonce of at least 256 bits of entropy.
 
@@ -839,6 +839,34 @@ The nonce MUST NOT be exposed outside the WebView navigation URL and the runtime
 **Security rationale:** The nonce is the proof that the entity on the other end of the WebSocket is the actual WebView instance, because the nonce lived only in the navigation URL — which only the runtime controlled and only the WebView received. A local unprivileged process cannot learn the nonce and therefore cannot authenticate to the WebSocket bridge.
 
 This protection does not apply to browser builds, where the URL (and therefore the nonce) is visible in the address bar and can be copied by the user or enumerated by other local processes. Applications that share secrets between the host runtime and the frontend SHOULD prefer webview builds over browser builds for this reason.
+
+### 21. Extension API
+
+A conforming Luminka implementation SHOULD support registration of custom event handlers.
+
+#### 21.1 Go-side Registration
+
+The runtime MUST export the following types and functions:
+
+- `WSMessage` — the full WebSocket message (header fields + raw payload)
+- `WSConnection` — a connected WebSocket client
+- `HandlerFunc` — the handler signature: `func(conn *WSConnection, msg *WSMessage) error`
+- `RegisterHandler(event string, handler HandlerFunc, opts ...RegisterOption)` — register a custom handler
+- `WithOverride()` — option signalling intent to replace a built-in handler
+- `ErrUnhandled` — sentinel returned by handlers that wish to fall through to built-in dispatch
+
+Custom handlers MUST run before the built-in event dispatch. If a handler returns `nil`, the built-in handler MUST NOT run. If a handler returns `ErrUnhandled`, the built-in dispatch MUST proceed normally.
+
+#### 21.2 SDK-side Methods
+
+The SDK MUST support:
+
+- `call(event, data?, payload?)` — send an event and await the response
+- `onEvent(event, listener)` — listen for server-pushed events without a request ID
+
+#### 21.3 Event Naming
+
+Custom events MUST follow the `namespace:action` convention established in ADR-0002. Built-in namespaces (`file:`, `handle:`, `stream:`, `script:`, `shell:`, `ws:`, `app:`) are reserved and SHOULD NOT be used for custom events unless the intent is to override a built-in handler.
 
 ## References
 

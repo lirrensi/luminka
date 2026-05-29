@@ -212,7 +212,7 @@ type WriteStreamState = {
 type ExecStreamState = {
   kind: "exec";
   requestId: string;
-  event: "script_exec_stream" | "shell_exec_stream";
+  event: "script:stream" | "shell:stream";
   streamId: string | null;
   stdoutChunks: Uint8Array[];
   stderrChunks: Uint8Array[];
@@ -264,6 +264,7 @@ export class LuminkaClient {
   private reconnectAttempt = 0;
   private readonly watchedPaths = new Set<string>();
   private readonly reconnectListeners = new Set<() => void | Promise<void>>();
+  private customEventListeners?: Map<string, Set<(msg: LuminkaFrame, payload: Uint8Array) => void>>;
 
   constructor(private readonly options: LuminkaOptions = {}) {}
 
@@ -357,7 +358,7 @@ export class LuminkaClient {
     }
 
     const id = this.nextId();
-    const frame = encodeLuminkaFrame({ event: "ws_auth", data: nonce, id });
+    const frame = encodeLuminkaFrame({ event: "ws:auth", data: nonce, id });
     socket.send(frame);
 
     await new Promise<void>((resolve, reject) => {
@@ -424,7 +425,7 @@ export class LuminkaClient {
     const paths = [...this.watchedPaths];
     for (const path of paths) {
       try {
-        await this.request({ event: "fs_watch", path });
+        await this.request({ event: "file:watch", path });
       } catch {
         // Best-effort: some watches may fail, continue with others
       }
@@ -439,7 +440,7 @@ export class LuminkaClient {
   }
 
   async appInfo(): Promise<LuminkaAppInfo> {
-    return this.requireAppInfo(await this.request({ event: "app_info" }));
+    return this.requireAppInfo(await this.request({ event: "app:info" }));
   }
 
   async readText(path: string): Promise<string> {
@@ -469,8 +470,8 @@ export class LuminkaClient {
   }
 
   async createReadStream(path: string): Promise<ReadableStream<Uint8Array>> {
-    const response = await this.request({ event: "fs_open_read", path });
-    const streamId = this.requireStreamId(response, "fs_open_read");
+    const response = await this.request({ event: "file:open_read", path });
+    const streamId = this.requireStreamId(response, "file:open_read");
     const state = this.getOrCreateReadStreamState(streamId);
     return new ReadableStream<Uint8Array>({
       start: (controller) => {
@@ -484,15 +485,15 @@ export class LuminkaClient {
   }
 
   async createWriteStream(path: string): Promise<WritableStream<Uint8Array>> {
-    const response = await this.request({ event: "fs_open_write", path });
-    const streamId = this.requireStreamId(response, "fs_open_write");
+    const response = await this.request({ event: "file:open_write", path });
+    const streamId = this.requireStreamId(response, "file:open_write");
     const state = this.getOrCreateWriteStreamState(streamId);
     return new WritableStream<Uint8Array>({
       write: async (chunk) => {
         if (state.closed) {
           throw new Error(`stream ${streamId} is closed`);
         }
-        await this.sendFrame({ event: "stream_chunk", stream_id: streamId, seq: state.nextSeq, eof: false }, toUint8Array(chunk));
+        await this.sendFrame({ event: "stream:chunk", stream_id: streamId, seq: state.nextSeq, eof: false }, toUint8Array(chunk));
         state.nextSeq++;
       },
       close: async () => {
@@ -500,13 +501,13 @@ export class LuminkaClient {
           return;
         }
         state.closed = true;
-        await this.request({ event: "stream_close", stream_id: streamId });
+        await this.request({ event: "stream:close", stream_id: streamId });
         this.streams.delete(streamId);
       },
       abort: async () => {
         state.closed = true;
         try {
-          await this.request({ event: "stream_close", stream_id: streamId });
+          await this.request({ event: "stream:close", stream_id: streamId });
         } finally {
           this.streams.delete(streamId);
         }
@@ -537,7 +538,7 @@ export class LuminkaClient {
   // === Node-style canonical API ===
 
   async access(path: string, mode?: number): Promise<void> {
-    const response = await this.request({ event: "fs_access", path, perm: mode ?? 0 });
+    const response = await this.request({ event: "file:access", path, perm: mode ?? 0 });
     if (!response.ok) throw this.responseError(response);
   }
 
@@ -547,20 +548,20 @@ export class LuminkaClient {
    */
   async appendFile(path: string, data: string | Uint8Array): Promise<void> {
     const bytes = typeof data === "string" ? textEncoder.encode(data) : data;
-    await this.request({ event: "fs_append_file", path }, bytes);
+    await this.request({ event: "file:append_file", path }, bytes);
   }
 
   async chmod(path: string, mode: number): Promise<void> {
-    await this.request({ event: "fs_chmod", path, perm: mode });
+    await this.request({ event: "file:chmod", path, perm: mode });
   }
 
   async copyFile(src: string, dest: string, mode?: number): Promise<void> {
-    await this.request({ event: "fs_copy_file", src, dest, perm: mode ?? 0 });
+    await this.request({ event: "file:copy_file", src, dest, perm: mode ?? 0 });
   }
 
   async cp(src: string, dest: string, options?: { recursive?: boolean }): Promise<void> {
     await this.request({
-      event: "fs_cp",
+      event: "file:cp",
       src,
       dest,
       flag: options?.recursive ? "recursive" : "",
@@ -568,17 +569,17 @@ export class LuminkaClient {
   }
 
   async link(existingPath: string, newPath: string): Promise<void> {
-    await this.request({ event: "fs_link", src: existingPath, dest: newPath });
+    await this.request({ event: "file:link", src: existingPath, dest: newPath });
   }
 
   async lstat(path: string): Promise<StatResult> {
-    const response = await this.request({ event: "fs_lstat", path });
+    const response = await this.request({ event: "file:lstat", path });
     return this.requireStat(response);
   }
 
   async mkdir(path: string, options?: { recursive?: boolean; mode?: number }): Promise<void> {
     await this.request({
-      event: "fs_mkdir",
+      event: "file:mkdir",
       path,
       perm: options?.mode,
       flag: options?.recursive ? "recursive" : "",
@@ -586,13 +587,13 @@ export class LuminkaClient {
   }
 
   async mkdtemp(prefix: string): Promise<string> {
-    const response = await this.request({ event: "fs_mkdtemp", path: prefix });
+    const response = await this.request({ event: "file:mkdtemp", path: prefix });
     return this.requireData(response, "tmp dir path");
   }
 
   async open(path: string, flags?: string, mode?: number): Promise<FileHandle> {
-    const response = await this.request({ event: "fs_open", path, flag: flags ?? "r", perm: mode ?? 0 });
-    const handleId = this.requireStreamId(response, "fs_open");
+    const response = await this.request({ event: "file:open", path, flag: flags ?? "r", perm: mode ?? 0 });
+    const handleId = this.requireStreamId(response, "file:open");
     return new LuminkaFileHandle(this, handleId);
   }
 
@@ -603,7 +604,7 @@ export class LuminkaClient {
 
   async readFile(path: string, options?: { encoding?: "utf8" | "binary" }): Promise<string | Uint8Array> {
     if (options?.encoding === "utf8") {
-      const response = await this.request({ event: "fs_read_file", path, flag: "utf8" });
+      const response = await this.request({ event: "file:read_file", path, flag: "utf8" });
       return this.requireData(response, "file data");
     }
     // Binary: use stream-based read
@@ -611,7 +612,7 @@ export class LuminkaClient {
   }
 
   async readdir(path: string, options?: { withFileTypes?: boolean }): Promise<string[] | DirEntry[]> {
-    const response = await this.request({ event: "fs_readdir", path });
+    const response = await this.request({ event: "file:readdir", path });
     const names = response.files ?? [];
     if (options?.withFileTypes) {
       const types = response.file_types ?? [];
@@ -625,52 +626,52 @@ export class LuminkaClient {
   }
 
   async readlink(path: string): Promise<string> {
-    const response = await this.request({ event: "fs_readlink", path });
+    const response = await this.request({ event: "file:readlink", path });
     return this.requireData(response, "link target");
   }
 
   async realpath(path: string): Promise<string> {
-    const response = await this.request({ event: "fs_realpath", path });
+    const response = await this.request({ event: "file:realpath", path });
     return this.requireData(response, "resolved path");
   }
 
   async rename(oldPath: string, newPath: string): Promise<void> {
-    await this.request({ event: "fs_rename", path: oldPath, dest: newPath });
+    await this.request({ event: "file:rename", path: oldPath, dest: newPath });
   }
 
   async rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void> {
     await this.request({
-      event: "fs_rm",
+      event: "file:rm",
       path,
       flag: options?.recursive ? "recursive" : "",
     });
   }
 
   async rmdir(path: string): Promise<void> {
-    await this.request({ event: "fs_rmdir", path });
+    await this.request({ event: "file:rmdir", path });
   }
 
   async stat(path: string): Promise<StatResult> {
-    const response = await this.request({ event: "fs_stat", path });
+    const response = await this.request({ event: "file:stat", path });
     return this.requireStat(response);
   }
 
   async symlink(target: string, path: string, type?: string): Promise<void> {
-    await this.request({ event: "fs_symlink", src: target, path, flag: type ?? "" });
+    await this.request({ event: "file:symlink", src: target, path, flag: type ?? "" });
   }
 
   async truncate(path: string, len?: number): Promise<void> {
-    await this.request({ event: "fs_truncate", path, len: len ?? 0 });
+    await this.request({ event: "file:truncate", path, len: len ?? 0 });
   }
 
   async unlink(path: string): Promise<void> {
-    await this.request({ event: "fs_unlink", path });
+    await this.request({ event: "file:unlink", path });
   }
 
   async utimes(path: string, atime: number | Date, mtime: number | Date): Promise<void> {
     const atimeStr = typeof atime === "number" ? String(atime) : atime.toISOString();
     const mtimeStr = typeof mtime === "number" ? String(mtime) : mtime.toISOString();
-    await this.request({ event: "fs_utimes", path, atime: atimeStr, mtime: mtimeStr });
+    await this.request({ event: "file:utimes", path, atime: atimeStr, mtime: mtimeStr });
   }
 
   /**
@@ -679,16 +680,16 @@ export class LuminkaClient {
    */
   async writeFile(path: string, data: string | Uint8Array): Promise<void> {
     const bytes = typeof data === "string" ? textEncoder.encode(data) : data;
-    await this.request({ event: "fs_write_file", path }, bytes);
+    await this.request({ event: "file:write_file", path }, bytes);
   }
 
   async watch(path: string): Promise<void> {
-    await this.request({ event: "fs_watch", path });
+    await this.request({ event: "file:watch", path });
     this.watchedPaths.add(path);
   }
 
   async unwatch(path: string): Promise<void> {
-    await this.request({ event: "fs_unwatch", path });
+    await this.request({ event: "file:unwatch", path });
     this.watchedPaths.delete(path);
   }
 
@@ -697,7 +698,7 @@ export class LuminkaClient {
   }
 
   async broadcast<T = unknown>(channel: string, data?: T, options: LuminkaBroadcastOptions = {}, payload: Uint8Array = new Uint8Array()): Promise<void> {
-    await this.request({ event: "broadcast", channel, data, echo: options.echo, content_type: options.contentType }, payload);
+    await this.request({ event: "ws:broadcast", channel, data, echo: options.echo, content_type: options.contentType }, payload);
   }
 
   onBroadcast<T = unknown>(channel: string, listener: (message: LuminkaBroadcastMessage<T>) => void | Promise<void>): () => void {
@@ -725,21 +726,21 @@ export class LuminkaClient {
   }
 
   async runScript(runner: string, file: string, args: string[] = [], timeout?: number): Promise<{ stdout: string; stderr: string; code: number | null }> {
-    const response = await this.request({ event: "script_exec", runner, file, args, timeout });
+    const response = await this.request({ event: "script:exec", runner, file, args, timeout });
     return this.requireExecResult(response);
   }
 
   async runShell(cmd: string, args: string[] = [], timeout?: number): Promise<{ stdout: string; stderr: string; code: number | null }> {
-    const response = await this.request({ event: "shell_exec", cmd, args, timeout });
+    const response = await this.request({ event: "shell:exec", cmd, args, timeout });
     return this.requireExecResult(response);
   }
 
   async runScriptStream(runner: string, file: string, args: string[] = [], timeout?: number): Promise<ExecStreamResult> {
-    return this.startExecStream({ event: "script_exec_stream", runner, file, args, timeout });
+    return this.startExecStream({ event: "script:stream", runner, file, args, timeout });
   }
 
   async runShellStream(cmd: string, args: string[] = [], timeout?: number): Promise<ExecStreamResult> {
-    return this.startExecStream({ event: "shell_exec_stream", cmd, args, timeout });
+    return this.startExecStream({ event: "shell:stream", cmd, args, timeout });
   }
 
   async read(path: string): Promise<string> {
@@ -766,7 +767,39 @@ export class LuminkaClient {
     return () => { this.reconnectListeners.delete(listener); };
   }
 
-  private async startExecStream(payload: Omit<LuminkaFrame, "id"> & { event: "script_exec_stream" | "shell_exec_stream" }): Promise<ExecStreamResult> {
+  /**
+   * Send an event to the runtime and await the response.
+   * This is the primary API for custom events.
+   * Generates a request ID internally.
+   *
+   * @example
+   * const resp = await client.call("goal:set", { goal: "ship" });
+   */
+  async call(event: string, data?: Record<string, unknown>, payload?: Uint8Array): Promise<LuminkaFrame> {
+    return this.request({ event, ...data } as LuminkaFrame, payload);
+  }
+
+  /**
+   * Listen for server-pushed events (no request ID).
+   * Returns an unsubscribe function.
+   *
+   * @example
+   * const unsub = client.onEvent("goal:changed", (msg) => { ... });
+   */
+  onEvent(event: string, listener: (msg: LuminkaFrame, payload: Uint8Array) => void): () => void {
+    if (!this.customEventListeners) {
+      this.customEventListeners = new Map();
+    }
+    if (!this.customEventListeners.has(event)) {
+      this.customEventListeners.set(event, new Set());
+    }
+    this.customEventListeners.get(event)!.add(listener);
+    return () => {
+      this.customEventListeners.get(event)?.delete(listener);
+    };
+  }
+
+  private async startExecStream(payload: Omit<LuminkaFrame, "id"> & { event: "script:stream" | "shell:stream" }): Promise<ExecStreamResult> {
     await this.connect();
     const socket = this.requireSocket();
     const requestId = this.nextId();
@@ -783,7 +816,7 @@ export class LuminkaClient {
     return { stdout: state.stdoutStream, stderr: state.stderrStream, completed: state.completed.promise };
   }
 
-  private createExecStreamState(requestId: string, event: "script_exec_stream" | "shell_exec_stream"): ExecStreamState & { stdoutStream: ReadableStream<Uint8Array>; stderrStream: ReadableStream<Uint8Array> } {
+  private createExecStreamState(requestId: string, event: "script:stream" | "shell:stream"): ExecStreamState & { stdoutStream: ReadableStream<Uint8Array>; stderrStream: ReadableStream<Uint8Array> } {
     const completed = createDeferred<{ code: number | null; stdout: string; stderr: string }>();
     const state = {
       kind: "exec",
@@ -884,29 +917,45 @@ export class LuminkaClient {
       return;
     }
 
-    if (message.header.event === "fs_changed" && message.header.path) {
+    // Dispatch to custom event listeners before built-in routing
+    const customListeners = this.customEventListeners?.get(message.header.event);
+    if (customListeners && customListeners.size > 0) {
+      for (const listener of customListeners) {
+        try {
+          listener(message.header, message.payload);
+        } catch {
+          // Best-effort
+        }
+      }
+      // Don't fall through to pending resolution — custom push events don't have IDs
+      if (!message.header.id) {
+        return;
+      }
+    }
+
+    if (message.header.event === "file:changed" && message.header.path) {
       for (const listener of this.fileListeners) {
         listener(message.header.path);
       }
       return;
     }
 
-    if (message.header.event === "broadcast" && message.header.channel) {
+    if (message.header.event === "ws:broadcast" && message.header.channel) {
       this.handleBroadcast(message.header, message.payload);
       return;
     }
 
-    if (message.header.event === "stream_chunk") {
+    if (message.header.event === "stream:chunk") {
       this.handleStreamChunk(message.header, message.payload);
       return;
     }
 
-    if (message.header.event === "stream_close") {
+    if (message.header.event === "stream:close") {
       this.handleStreamClose(message.header);
       return;
     }
 
-    if (message.header.event === "script_response" || message.header.event === "shell_response") {
+    if (message.header.event === "response:script:exec" || message.header.event === "response:shell:exec") {
       this.handleExecResponse(message.header);
       return;
     }
@@ -915,13 +964,13 @@ export class LuminkaClient {
     if (!id) {
       return;
     }
-    const closedStreamId = message.header.event === "stream_close" ? message.header.stream_id ?? null : null;
+    const closedStreamId = message.header.event === "stream:close" ? message.header.stream_id ?? null : null;
     const pending = this.pending.get(id);
     if (!pending) {
       return;
     }
     this.pending.delete(id);
-    if (message.header.ok === false || message.header.event === "error") {
+    if (message.header.ok === false || message.header.event === "response:error") {
       if (closedStreamId) {
         this.removeStream(closedStreamId);
       }
@@ -929,10 +978,10 @@ export class LuminkaClient {
       return;
     }
 
-    if (message.header.event === "fs_open_read" && message.header.stream_id) {
+    if (message.header.event === "file:open_read" && message.header.stream_id) {
       this.getOrCreateReadStreamState(message.header.stream_id);
     }
-    if (message.header.event === "fs_open_write" && message.header.stream_id) {
+    if (message.header.event === "file:open_write" && message.header.stream_id) {
       this.getOrCreateWriteStreamState(message.header.stream_id);
     }
     if (closedStreamId) {
@@ -1446,7 +1495,7 @@ class LuminkaFileHandle implements FileHandle {
   async read(options?: { length?: number; position?: number }): Promise<Uint8Array> {
     this.assertOpen();
     const response = await this.client.request({
-      event: "handle_read",
+      event: "handle:read",
       stream_id: this.handleId,
       offset: options?.position,  // undefined (omit) = current position, number = explicit offset
       length: options?.length,    // undefined (omit) = read all, number = read N bytes
@@ -1458,7 +1507,7 @@ class LuminkaFileHandle implements FileHandle {
   async write(data: Uint8Array, position?: number): Promise<void> {
     this.assertOpen();
     await this.client.request(
-      { event: "handle_write", stream_id: this.handleId, offset: position },  // undefined (omit) = append, number = WriteAt
+      { event: "handle:write", stream_id: this.handleId, offset: position },  // undefined (omit) = append, number = WriteAt
       data,
     );
   }
@@ -1466,28 +1515,28 @@ class LuminkaFileHandle implements FileHandle {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    await this.client.request({ event: "handle_close", stream_id: this.handleId });
+    await this.client.request({ event: "handle:close", stream_id: this.handleId });
   }
 
   async stat(): Promise<StatResult> {
     this.assertOpen();
-    const response = await this.client.request({ event: "handle_stat", stream_id: this.handleId });
+    const response = await this.client.request({ event: "handle:stat", stream_id: this.handleId });
     return this.client["requireStat"](response);
   }
 
   async truncate(len?: number): Promise<void> {
     this.assertOpen();
-    await this.client.request({ event: "handle_truncate", stream_id: this.handleId, len: len ?? 0 });
+    await this.client.request({ event: "handle:truncate", stream_id: this.handleId, len: len ?? 0 });
   }
 
   async sync(): Promise<void> {
     this.assertOpen();
-    await this.client.request({ event: "handle_sync", stream_id: this.handleId });
+    await this.client.request({ event: "handle:sync", stream_id: this.handleId });
   }
 
   async datasync(): Promise<void> {
     this.assertOpen();
-    await this.client.request({ event: "handle_datasync", stream_id: this.handleId });
+    await this.client.request({ event: "handle:datasync", stream_id: this.handleId });
   }
 
   async readFile(): Promise<Uint8Array> {
@@ -1505,19 +1554,19 @@ class LuminkaFileHandle implements FileHandle {
 
   async appendFile(data: Uint8Array): Promise<void> {
     this.assertOpen();
-    await this.client.request({ event: "handle_write", stream_id: this.handleId }, data);
+    await this.client.request({ event: "handle:write", stream_id: this.handleId }, data);
   }
 
   async chmod(mode: number): Promise<void> {
     this.assertOpen();
-    await this.client.request({ event: "handle_chmod", stream_id: this.handleId, perm: mode });
+    await this.client.request({ event: "handle:chmod", stream_id: this.handleId, perm: mode });
   }
 
   async utimes(atime: number | Date, mtime: number | Date): Promise<void> {
     this.assertOpen();
     const atimeStr = typeof atime === "number" ? String(atime) : atime.toISOString();
     const mtimeStr = typeof mtime === "number" ? String(mtime) : mtime.toISOString();
-    await this.client.request({ event: "handle_utimes", stream_id: this.handleId, atime: atimeStr, mtime: mtimeStr });
+    await this.client.request({ event: "handle:utimes", stream_id: this.handleId, atime: atimeStr, mtime: mtimeStr });
   }
 
   createReadStream(options?: { start?: number }): ReadableStream<Uint8Array> {

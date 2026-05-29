@@ -25,9 +25,9 @@ func TestWebSocketAppInfoAndFilesystemFlow(t *testing.T) {
 	root := t.TempDir()
 	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
 
-	mustWriteWS(t, conn, map[string]any{"event": "app_info", "id": "a1"})
+	mustWriteWS(t, conn, map[string]any{"event": "app:info", "id": "a1"})
 	appInfo := mustReadWS(t, conn)
-	assertWSOK(t, appInfo, "app_info", "a1")
+	assertWSOK(t, appInfo, "response:app:info", "a1")
 	if got := appInfo["name"]; got != "test-app" {
 		t.Fatalf("app_info name = %v, want test-app", got)
 	}
@@ -48,33 +48,33 @@ func TestWebSocketAppInfoAndFilesystemFlow(t *testing.T) {
 		t.Fatalf("app_info capabilities = %#v, want fs enabled", appInfo["capabilities"])
 	}
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_write_text", "id": "f1", "path": "notes/todo.txt", "data": "ship tests"})
-	assertWSOK(t, mustReadWS(t, conn), "fs_response", "f1")
+	mustWriteWS(t, conn, map[string]any{"event": "file:write_text", "id": "f1", "path": "notes/todo.txt", "data": "ship tests"})
+	assertWSOK(t, mustReadWS(t, conn), "response:file:write_text", "f1")
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_read_text", "id": "f2", "path": "notes/todo.txt"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:read_text", "id": "f2", "path": "notes/todo.txt"})
 	read := mustReadWS(t, conn)
-	assertWSOK(t, read, "fs_response", "f2")
+	assertWSOK(t, read, "response:file:read_text", "f2")
 	if got := read["data"]; got != "ship tests" {
 		t.Fatalf("fs_read data = %v, want ship tests", got)
 	}
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_exists", "id": "f3", "path": "notes/todo.txt"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:exists", "id": "f3", "path": "notes/todo.txt"})
 	exists := mustReadWS(t, conn)
-	assertWSOK(t, exists, "fs_response", "f3")
+	assertWSOK(t, exists, "response:file:exists", "f3")
 	if got := exists["exists"]; got != true {
 		t.Fatalf("fs_exists exists = %v, want true", got)
 	}
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_list", "id": "f4", "path": "notes"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:list", "id": "f4", "path": "notes"})
 	list := mustReadWS(t, conn)
-	assertWSOK(t, list, "fs_response", "f4")
+	assertWSOK(t, list, "response:file:list", "f4")
 	files, ok := list["files"].([]any)
 	if !ok || len(files) != 1 || files[0] != "todo.txt" {
 		t.Fatalf("fs_list files = %#v, want [todo.txt]", list["files"])
 	}
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_delete", "id": "f5", "path": "notes/todo.txt"})
-	assertWSOK(t, mustReadWS(t, conn), "fs_response", "f5")
+	mustWriteWS(t, conn, map[string]any{"event": "file:delete", "id": "f5", "path": "notes/todo.txt"})
+	assertWSOK(t, mustReadWS(t, conn), "response:file:delete", "f5")
 
 	if _, err := os.Stat(filepath.Join(root, "notes", "todo.txt")); !os.IsNotExist(err) {
 		t.Fatalf("file still exists on disk, stat err = %v", err)
@@ -87,19 +87,19 @@ func TestWebSocketChunkedByteFilesystemFlow(t *testing.T) {
 
 	payload := bytes.Repeat([]byte("0123456789abcdef"), (fsStreamChunkSize/16)+2)
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open_write", "id": "bw1", "path": "bytes/payload.bin"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open_write", "id": "bw1", "path": "bytes/payload.bin"})
 	writeAck, _ := mustReadWSFrame(t, conn)
 	streamID, _ := writeAck["stream_id"].(string)
 	if streamID == "" {
 		t.Fatal("fs_open_write ack missing stream_id")
 	}
 
-	mustWriteWSFrame(t, conn, map[string]any{"event": "stream_chunk", "stream_id": streamID, "seq": 0}, payload[:fsStreamChunkSize])
-	mustWriteWSFrame(t, conn, map[string]any{"event": "stream_chunk", "stream_id": streamID, "seq": 1}, payload[fsStreamChunkSize:])
-	mustWriteWS(t, conn, map[string]any{"event": "stream_close", "id": "bw-close", "stream_id": streamID})
-	assertWSOK(t, mustReadWS(t, conn), "stream_close", "bw-close")
+	mustWriteWSFrame(t, conn, map[string]any{"event": "stream:chunk", "stream_id": streamID, "seq": 0}, payload[:fsStreamChunkSize])
+	mustWriteWSFrame(t, conn, map[string]any{"event": "stream:chunk", "stream_id": streamID, "seq": 1}, payload[fsStreamChunkSize:])
+	mustWriteWS(t, conn, map[string]any{"event": "stream:close", "id": "bw-close", "stream_id": streamID})
+	assertWSOK(t, mustReadWS(t, conn), "stream:close", "bw-close")
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open_read", "id": "br1", "path": "bytes/payload.bin"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open_read", "id": "br1", "path": "bytes/payload.bin"})
 	readAck, _ := mustReadWSFrame(t, conn)
 	readStreamID, _ := readAck["stream_id"].(string)
 	if readStreamID == "" {
@@ -110,9 +110,9 @@ func TestWebSocketChunkedByteFilesystemFlow(t *testing.T) {
 	for {
 		header, chunk := mustReadWSFrame(t, conn)
 		switch header["event"] {
-		case "stream_chunk":
+		case "stream:chunk":
 			got.Write(chunk)
-		case "stream_close":
+		case "stream:close":
 			if sid, _ := header["stream_id"].(string); sid != readStreamID {
 				t.Fatalf("stream_close stream_id = %q, want %q", sid, readStreamID)
 			}
@@ -130,25 +130,25 @@ func TestWebSocketCapabilityGatingResponses(t *testing.T) {
 	root := t.TempDir()
 	_, conn := newTestWebSocketRuntime(t, root, capabilityState{})
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_read_text", "id": "fs1", "path": "blocked.txt"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:read_text", "id": "fs1", "path": "blocked.txt"})
 	fsResp := mustReadWS(t, conn)
-	assertWSFailure(t, fsResp, "fs_response", "fs1", "filesystem capability is disabled")
+	assertWSFailure(t, fsResp, "response:file:read_text", "fs1", "filesystem capability is disabled")
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open_read", "id": "fs2", "path": "blocked.txt"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open_read", "id": "fs2", "path": "blocked.txt"})
 	openReadResp := mustReadWS(t, conn)
-	assertWSFailure(t, openReadResp, "fs_response", "fs2", "filesystem capability is disabled")
+	assertWSFailure(t, openReadResp, "response:file:open_read", "fs2", "filesystem capability is disabled")
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open_write", "id": "fs3", "path": "blocked.txt"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open_write", "id": "fs3", "path": "blocked.txt"})
 	openWriteResp := mustReadWS(t, conn)
-	assertWSFailure(t, openWriteResp, "fs_response", "fs3", "filesystem capability is disabled")
+	assertWSFailure(t, openWriteResp, "response:file:open_write", "fs3", "filesystem capability is disabled")
 
-	mustWriteWS(t, conn, map[string]any{"event": "script_exec", "id": "s1", "runner": "python", "file": "tool.py"})
+	mustWriteWS(t, conn, map[string]any{"event": "script:exec", "id": "s1", "runner": "python", "file": "tool.py"})
 	scriptResp := mustReadWS(t, conn)
-	assertWSFailure(t, scriptResp, "script_response", "s1", "script capability is disabled")
+	assertWSFailure(t, scriptResp, "response:script:exec", "s1", "script capability is disabled")
 
-	mustWriteWS(t, conn, map[string]any{"event": "shell_exec", "id": "h1", "cmd": "cmd"})
+	mustWriteWS(t, conn, map[string]any{"event": "shell:exec", "id": "h1", "cmd": "cmd"})
 	shellResp := mustReadWS(t, conn)
-	assertWSFailure(t, shellResp, "shell_response", "h1", "shell capability is disabled")
+	assertWSFailure(t, shellResp, "response:shell:exec", "h1", "shell capability is disabled")
 }
 
 func TestWebSocketWatcherPushesFSChanged(t *testing.T) {
@@ -160,8 +160,8 @@ func TestWebSocketWatcherPushesFSChanged(t *testing.T) {
 
 	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_watch", "id": "w1", "path": "watched.txt"})
-	assertWSOK(t, mustReadWS(t, conn), "fs_response", "w1")
+	mustWriteWS(t, conn, map[string]any{"event": "file:watch", "id": "w1", "path": "watched.txt"})
+	assertWSOK(t, mustReadWS(t, conn), "response:file:watch", "w1")
 
 	time.Sleep(20 * time.Millisecond)
 	if err := os.WriteFile(watchFile, []byte("after"), 0o644); err != nil {
@@ -171,7 +171,7 @@ func TestWebSocketWatcherPushesFSChanged(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		msg := mustReadWS(t, conn)
-		if msg["event"] == "fs_changed" {
+		if msg["event"] == "file:changed" {
 			if got := msg["path"]; got != "watched.txt" {
 				t.Fatalf("fs_changed path = %v, want watched.txt", got)
 			}
@@ -187,8 +187,8 @@ func TestWebSocketRejectsTextFrames(t *testing.T) {
 
 	mustWriteTextWS(t, conn, []byte(`{"event":"app_info","id":"t1"}`))
 	msg := mustReadWS(t, conn)
-	if got := msg["event"]; got != "error" {
-		t.Fatalf("event = %v, want error", got)
+	if got := msg["event"]; got != "response:error" {
+		t.Fatalf("event = %v, want response:error", got)
 	}
 	if _, ok := msg["error"].(string); !ok {
 		t.Fatalf("error payload = %#v, want string", msg["error"])
@@ -204,8 +204,8 @@ func TestWebSocketRejectsMalformedBinaryFrames(t *testing.T) {
 
 	conn.reads <- fakeWSFrame{msgType: websocket.BinaryMessage, data: []byte{1, 2, 3}}
 	msg := mustReadWS(t, conn)
-	if got := msg["event"]; got != "error" {
-		t.Fatalf("event = %v, want error", got)
+	if got := msg["event"]; got != "response:error" {
+		t.Fatalf("event = %v, want response:error", got)
 	}
 	if _, ok := msg["error"].(string); !ok {
 		t.Fatalf("error payload = %#v, want string", msg["error"])
@@ -218,8 +218,8 @@ func TestWebSocketRejectsUnknownAndMissingEvents(t *testing.T) {
 
 	mustWriteWS(t, conn, map[string]any{"event": "mystery", "id": "u1"})
 	unknown := mustReadWS(t, conn)
-	if got := unknown["event"]; got != "error" {
-		t.Fatalf("unknown event response event = %v, want error", got)
+	if got := unknown["event"]; got != "response:error" {
+		t.Fatalf("unknown event response event = %v, want response:error", got)
 	}
 	if got := unknown["id"]; got != "u1" {
 		t.Fatalf("unknown event response id = %v, want u1", got)
@@ -230,8 +230,8 @@ func TestWebSocketRejectsUnknownAndMissingEvents(t *testing.T) {
 
 	mustWriteWS(t, conn, map[string]any{"id": "u2"})
 	missing := mustReadWS(t, conn)
-	if got := missing["event"]; got != "error" {
-		t.Fatalf("missing event response event = %v, want error", got)
+	if got := missing["event"]; got != "response:error" {
+		t.Fatalf("missing event response event = %v, want response:error", got)
 	}
 	if got := missing["id"]; got != "u2" {
 		t.Fatalf("missing event response id = %v, want u2", got)
@@ -291,7 +291,7 @@ func newTestWebSocketRuntime(t *testing.T, root string, caps capabilityState) (*
 		ShellBridge:  NewShellBridge(root, time.Second),
 		Assets:       fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}},
 		streams:      newStreamRegistry(),
-		connections:  make(map[*wsConnection]struct{}),
+		connections:  make(map[*WSConnection]struct{}),
 		shutdownCh:   make(chan struct{}),
 	}
 	rt.Watcher = NewWatcher(root, 25*time.Millisecond, func(path string) error {

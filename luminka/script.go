@@ -95,7 +95,7 @@ func (sb *ScriptBridge) Exec(runner string, file string, args []string, timeout 
 	return stdout, stderr, code, err
 }
 
-func (sb *ScriptBridge) ExecStream(rt *Runtime, conn *wsConnection, id json.RawMessage, runner string, file string, args []string, timeout time.Duration) error {
+func (sb *ScriptBridge) ExecStream(rt *Runtime, conn *WSConnection, id json.RawMessage, runner string, file string, args []string, timeout time.Duration) error {
 	if sb == nil {
 		return errors.New("script bridge is required")
 	}
@@ -191,7 +191,7 @@ func (sb *ScriptBridge) ExecStream(rt *Runtime, conn *wsConnection, id json.RawM
 			errText = waitErr.Error()
 		}
 	}
-	if err := writeWSMessage(conn, wsMessage{Event: "script_response", ID: id, Ok: boolPtr(ok), Code: intPtr(code), Error: errText, StreamID: stream.id}); err != nil {
+	if err := WriteWSMessage(conn, WSMessage{Event: "response:script:exec", ID: id, Ok: boolPtr(ok), Code: intPtr(code), Error: errText, StreamID: stream.id}); err != nil {
 		return err
 	}
 	return nil

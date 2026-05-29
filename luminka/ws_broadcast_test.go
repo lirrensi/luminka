@@ -13,8 +13,8 @@ import (
 // --- Nil Runtime ---
 
 func TestBroadcastNilRuntime(t *testing.T) {
-	sender := &wsConnection{conn: newFakeWebSocketConn()}
-	req := wsMessage{Event: "broadcast", ID: rawStringData("b1"), Channel: "chat", Data: rawStringData("hi")}
+	sender := &WSConnection{conn: newFakeWebSocketConn()}
+	req := WSMessage{Event: "ws:broadcast", ID: rawStringData("b1"), Channel: "chat", Data: rawStringData("hi")}
 
 	// When rt is nil, the function writes an error response and returns nil (write success)
 	err := (*Runtime)(nil).handleBroadcastRequest(sender, req, nil)
@@ -25,8 +25,8 @@ func TestBroadcastNilRuntime(t *testing.T) {
 	frame := <-sender.conn.(*fakeWebSocketConn).writes
 	var resp map[string]any
 	_, _ = decodeFrame(frame.data, &resp)
-	if resp["event"] != "error" {
-		t.Fatalf("event = %v, want error", resp["event"])
+	if resp["event"] != "response:error" {
+		t.Fatalf("event = %v, want response:error", resp["event"])
 	}
 	if resp["error"] != "runtime is required" {
 		t.Fatalf("error = %v, want 'runtime is required'", resp["error"])
@@ -37,12 +37,12 @@ func TestBroadcastNilRuntime(t *testing.T) {
 
 func TestBroadcastEmptyChannel(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	sender := &wsConnection{conn: fconn}
+	sender := &WSConnection{conn: fconn}
 	rt := &Runtime{
-		connections: make(map[*wsConnection]struct{}),
+		connections: make(map[*WSConnection]struct{}),
 	}
 
-	req := wsMessage{Event: "broadcast", ID: rawStringData("b2")}
+	req := WSMessage{Event: "ws:broadcast", ID: rawStringData("b2")}
 	err := rt.handleBroadcastRequest(sender, req, nil)
 	if err != nil {
 		t.Fatalf("handleBroadcastRequest returned error (message is sent via WS): %v", err)
@@ -51,7 +51,7 @@ func TestBroadcastEmptyChannel(t *testing.T) {
 	frame := <-fconn.writes
 	var resp map[string]any
 	_, _ = decodeFrame(frame.data, &resp)
-	if resp["event"] != "broadcast_response" {
+	if resp["event"] != "response:ws:broadcast" {
 		t.Fatalf("event = %v, want broadcast_response", resp["event"])
 	}
 	if ok, _ := resp["ok"].(bool); ok != false {
@@ -69,20 +69,20 @@ func TestBroadcastWithEcho(t *testing.T) {
 	fconn2 := newFakeWebSocketConn()
 	fconn3 := newFakeWebSocketConn()
 
-	conn1 := &wsConnection{conn: fconn1}
-	conn2 := &wsConnection{conn: fconn2}
-	conn3 := &wsConnection{conn: fconn3}
+	conn1 := &WSConnection{conn: fconn1}
+	conn2 := &WSConnection{conn: fconn2}
+	conn3 := &WSConnection{conn: fconn3}
 
 	rt := &Runtime{
-		connections: map[*wsConnection]struct{}{
+		connections: map[*WSConnection]struct{}{
 			conn1: {},
 			conn2: {},
 			conn3: {},
 		},
 	}
 
-	req := wsMessage{
-		Event:       "broadcast",
+	req := WSMessage{
+		Event:       "ws:broadcast",
 		ID:          rawStringData("b3"),
 		Channel:     "chat",
 		Data:        rawStringData("hello everyone"),
@@ -119,7 +119,7 @@ func TestBroadcastWithEcho(t *testing.T) {
 	// Among the 3 broadcast messages, verify channel/content_type/payload
 	broadcastCount := 0
 	for _, r := range results {
-		if r.event == "broadcast" {
+		if r.event == "ws:broadcast" {
 			broadcastCount++
 		}
 	}
@@ -132,7 +132,7 @@ func TestBroadcastWithEcho(t *testing.T) {
 	senderResp := <-fconn1.writes
 	var sr map[string]any
 	_, _ = decodeFrame(senderResp.data, &sr)
-	if sr["event"] != "broadcast_response" {
+	if sr["event"] != "response:ws:broadcast" {
 		t.Fatalf("sender event = %v, want broadcast_response", sr["event"])
 	}
 	if ok, _ := sr["ok"].(bool); !ok {
@@ -146,18 +146,18 @@ func TestBroadcastWithoutEcho(t *testing.T) {
 	fconn1 := newFakeWebSocketConn()
 	fconn2 := newFakeWebSocketConn()
 
-	conn1 := &wsConnection{conn: fconn1}
-	conn2 := &wsConnection{conn: fconn2}
+	conn1 := &WSConnection{conn: fconn1}
+	conn2 := &WSConnection{conn: fconn2}
 
 	rt := &Runtime{
-		connections: map[*wsConnection]struct{}{
+		connections: map[*WSConnection]struct{}{
 			conn1: {},
 			conn2: {},
 		},
 	}
 
-	req := wsMessage{
-		Event:   "broadcast",
+	req := WSMessage{
+		Event:   "ws:broadcast",
 		ID:      rawStringData("b4"),
 		Channel: "alerts",
 		Data:    rawStringData("warning"),
@@ -173,7 +173,7 @@ func TestBroadcastWithoutEcho(t *testing.T) {
 	senderResp := <-fconn1.writes
 	var sr map[string]any
 	_, _ = decodeFrame(senderResp.data, &sr)
-	if sr["event"] != "broadcast_response" {
+	if sr["event"] != "response:ws:broadcast" {
 		t.Fatalf("sender event = %v, want broadcast_response", sr["event"])
 	}
 
@@ -181,7 +181,7 @@ func TestBroadcastWithoutEcho(t *testing.T) {
 	frame2 := <-fconn2.writes
 	var msg2 map[string]any
 	_, _ = decodeFrame(frame2.data, &msg2)
-	if msg2["event"] != "broadcast" {
+	if msg2["event"] != "ws:broadcast" {
 		t.Fatalf("conn2 event = %v, want broadcast", msg2["event"])
 	}
 	if msg2["channel"] != "alerts" {
@@ -193,7 +193,7 @@ func TestBroadcastWithoutEcho(t *testing.T) {
 	case extra := <-fconn1.writes:
 		var extraMsg map[string]any
 		_, _ = decodeFrame(extra.data, &extraMsg)
-		if extraMsg["event"] == "broadcast" {
+		if extraMsg["event"] == "ws:broadcast" {
 			t.Fatal("conn1 should not receive broadcast when echo=false")
 		}
 	default:
@@ -205,21 +205,21 @@ func TestBroadcastWithoutEcho(t *testing.T) {
 
 func TestBroadcastMultipleTargets(t *testing.T) {
 	fconns := make([]*fakeWebSocketConn, 5)
-	conns := make([]*wsConnection, 5)
-	connsByFake := make(map[*fakeWebSocketConn]*wsConnection)
+	conns := make([]*WSConnection, 5)
+	connsByFake := make(map[*fakeWebSocketConn]*WSConnection)
 
 	rt := &Runtime{
-		connections: make(map[*wsConnection]struct{}),
+		connections: make(map[*WSConnection]struct{}),
 	}
 	for i := 0; i < 5; i++ {
 		fconns[i] = newFakeWebSocketConn()
-		conns[i] = &wsConnection{conn: fconns[i]}
+		conns[i] = &WSConnection{conn: fconns[i]}
 		connsByFake[fconns[i]] = conns[i]
 		rt.connections[conns[i]] = struct{}{}
 	}
 
-	req := wsMessage{
-		Event:   "broadcast",
+	req := WSMessage{
+		Event:   "ws:broadcast",
 		ID:      rawStringData("b5"),
 		Channel: "system",
 		Echo:    false,
@@ -239,7 +239,7 @@ func TestBroadcastMultipleTargets(t *testing.T) {
 		frame := <-fconns[i].writes
 		var msg map[string]any
 		_, _ = decodeFrame(frame.data, &msg)
-		if msg["event"] != "broadcast" {
+		if msg["event"] != "ws:broadcast" {
 			t.Fatalf("conn[%d] event = %v, want broadcast", i, msg["event"])
 		}
 		if msg["channel"] != "system" {
@@ -252,15 +252,15 @@ func TestBroadcastMultipleTargets(t *testing.T) {
 
 func TestBroadcastNoConnections(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	sender := &wsConnection{conn: fconn}
+	sender := &WSConnection{conn: fconn}
 
 	rt := &Runtime{
-		connections: make(map[*wsConnection]struct{}),
+		connections: make(map[*WSConnection]struct{}),
 		// sender is NOT registered
 	}
 
-	req := wsMessage{
-		Event:   "broadcast",
+	req := WSMessage{
+		Event:   "ws:broadcast",
 		ID:      rawStringData("b6"),
 		Channel: "chat",
 		Echo:    true,
@@ -275,7 +275,7 @@ func TestBroadcastNoConnections(t *testing.T) {
 	frame := <-fconn.writes
 	var resp map[string]any
 	_, _ = decodeFrame(frame.data, &resp)
-	if resp["event"] != "broadcast_response" {
+	if resp["event"] != "response:ws:broadcast" {
 		t.Fatalf("event = %v, want broadcast_response", resp["event"])
 	}
 	if ok, _ := resp["ok"].(bool); !ok {
@@ -292,11 +292,11 @@ func TestBroadcastSenderNotRequiredForResponse(t *testing.T) {
 	// If sender is nil, writeWSMessage will error (tested in ws_transport).
 	// This test verifies the early guards don't panic on nil sender.
 	rt := &Runtime{
-		connections: make(map[*wsConnection]struct{}),
+		connections: make(map[*WSConnection]struct{}),
 	}
 
 	// nil sender with non-nil runtime — early guards pass, writeWSMessage fails
-	req := wsMessage{Event: "broadcast", ID: rawStringData("b7"), Channel: "ch"}
+	req := WSMessage{Event: "ws:broadcast", ID: rawStringData("b7"), Channel: "ch"}
 	err := rt.handleBroadcastRequest(nil, req, nil)
 	if err == nil {
 		t.Fatal("expected error for nil sender")
@@ -308,11 +308,11 @@ func TestBroadcastSenderNotRequiredForResponse(t *testing.T) {
 func TestBroadcastConcurrent(t *testing.T) {
 	fconn1 := newFakeWebSocketConn()
 	fconn2 := newFakeWebSocketConn()
-	conn1 := &wsConnection{conn: fconn1}
-	conn2 := &wsConnection{conn: fconn2}
+	conn1 := &WSConnection{conn: fconn1}
+	conn2 := &WSConnection{conn: fconn2}
 
 	rt := &Runtime{
-		connections: map[*wsConnection]struct{}{
+		connections: map[*WSConnection]struct{}{
 			conn1: {},
 			conn2: {},
 		},
@@ -323,8 +323,8 @@ func TestBroadcastConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			req := wsMessage{
-				Event:   "broadcast",
+			req := WSMessage{
+				Event:   "ws:broadcast",
 				ID:      rawStringData("bc"),
 				Channel: "concurrent",
 				Echo:    false,

@@ -1,7 +1,7 @@
 // FILE: luminka/app.go
 // PURPOSE: Orchestrate Luminka runtime startup, launch policy resolution, and shutdown flow.
 // OWNS: Config and Mode definitions, runtime state, launch policy state, capability state, and startup/shutdown flow.
-// EXPORTS: Mode, ModeBrowser, ModeWebview, Config, Runtime, Run
+// EXPORTS: Mode, ModeBrowser, ModeWebview, Config, Runtime, Run, RegisterHandler, WithOverride, ErrUnhandled
 // DOCS: docs/spec.md, docs/arch.md
 
 package luminka
@@ -89,7 +89,7 @@ type Runtime struct {
 	PID       int
 	ownedLock bool
 
-	connections map[*wsConnection]struct{}
+	connections map[*WSConnection]struct{}
 	mu          sync.Mutex
 	idleTimer   *time.Timer
 	streams     *streamRegistry
@@ -98,6 +98,9 @@ type Runtime struct {
 	shutdownOnce sync.Once
 	listener     net.Listener
 	server       *http.Server
+
+	customHandlers map[string]handlerEntry
+	handlerMu      sync.RWMutex
 }
 
 type lockState struct {
@@ -269,7 +272,7 @@ func prepareRuntime(cfg Config) (*Runtime, *lockState, error) {
 		Port:            cfg.Port,
 		LockPath:        lockPath,
 		PID:             os.Getpid(),
-		connections:     make(map[*wsConnection]struct{}),
+		connections:     make(map[*WSConnection]struct{}),
 		streams:         newStreamRegistry(),
 		shutdownCh:      make(chan struct{}),
 	}

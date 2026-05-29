@@ -2,7 +2,7 @@
     "name": "luminka",
     "private": true,
     "type": "module",
-    "version": "3.2.1",
+    "version": "4.0.1",
     "description": "Browser-first Go runtime with an in-repo TypeScript SDK for desktop-style web apps.",
     "license": "MIT",
     "author": "lirrensi",

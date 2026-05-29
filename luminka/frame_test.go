@@ -23,7 +23,7 @@ func TestEncodeDecodeFrame(t *testing.T) {
 		payload []byte
 	}{
 		{name: "header only", header: testFrameHeader{Event: "app_info", ID: "a1"}},
-		{name: "header and payload", header: testFrameHeader{Event: "stream_chunk", ID: "s1"}, payload: []byte("hello world")},
+		{name: "header and payload", header: testFrameHeader{Event: "stream:chunk", ID: "s1"}, payload: []byte("hello world")},
 	}
 
 	for _, tc := range tests {

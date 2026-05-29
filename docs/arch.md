@@ -138,7 +138,7 @@ Implementation direction:
 - decoding the JSON header,
 - preserving request/response correlation,
 - handing off payload-bearing frames to stream sessions,
-- pushing notifications such as `fs_changed`,
+- pushing notifications such as `file:changed`,
 - routing transient `broadcast` events between connected frontend clients in the same runtime instance.
 
 The transport layer uses the canonical frame shape:
@@ -198,13 +198,13 @@ The filesystem code is always present in the runtime, but the frontend-facing fi
 
 #### FileHandle lifecycle (runtime side)
 
-When `fs_open` is requested over the wire, the runtime:
+When `file:open` is requested over the wire, the runtime:
 
 1. resolves and validates the path through `FSBridge.Open(path, flags, perm)`,
 2. stores the open `*os.File` in a handle registry keyed by a unique handle ID (reuses the stream management infrastructure),
 3. returns the handle ID to the frontend,
-4. forwards subsequent `handle_*` operations to the registered handle,
-5. closes the OS handle and removes the registry entry on `handle_close`,
+4. forwards subsequent `handle:*` operations to the registered handle,
+5. closes the OS handle and removes the registry entry on `handle:close`,
 6. cleans up all handles owned by a connection when that WebSocket connection closes.
 
 The handle registry is in-memory and per-runtime-instance. Handle IDs are unique within a runtime session.
@@ -444,7 +444,7 @@ frontend code
 frontend registers watch
   -> runtime stores watched path
   -> watch subsystem detects modification
-  -> dispatcher pushes fs_changed
+  -> dispatcher pushes file:changed
   -> frontend decides whether to re-read
 ```
 
@@ -457,7 +457,7 @@ frontend creates tracked text file helper
   -> helper registers a raw runtime watch for the path
   -> helper load reads text and records current known text
   -> helper save writes text and records SDK-originated known text
-  -> runtime may later emit raw fs_changed for that same write
+  -> runtime may later emit raw file:changed for that same write
   -> helper debounces and re-reads the file
   -> helper suppresses the event if text matches known SDK state
   -> helper notifies subscribers if text differs from known SDK state
@@ -598,6 +598,9 @@ Operational expectations:
 | Install script templates as repo library | Scripts live in the repo as templates that app developers copy and customize — the framework does not enforce one install model | High |
 | Placeholder-based scripts instead of parameterized | Developers edit the script once per app instead of passing the app name every invocation; simpler to ship in a release artifact | Medium |
 | WebView nonce auth, browser mode skipped | Nonce auth closes the realistic local-attacker gap for webview builds; browser mode address bar visibility makes nonce ineffective there | High |
+| WSMessage and WSConnection are exported types | Custom handler registration requires the message and connection types to be part of the public API | High |
+| Handler registration map lives on Runtime | The Runtime struct owns the custom handler registry and RWMutex, making handler lookup safe from concurrent WebSocket goroutines | High |
+| Dispatch order: custom handlers → built-in switch → unknown event error | Custom handlers get first look at every event; they may handle it, delegate to built-in via ErrUnhandled, or return an error | High |
 
 ## Implementation Pointers
 

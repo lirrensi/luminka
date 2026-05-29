@@ -1,7 +1,7 @@
 // FILE: luminka/ws_transport.go
 // PURPOSE: Encode websocket responses as binary envelopes and decode inbound frames.
 // OWNS: Websocket read and write helpers plus protocol response serialization.
-// EXPORTS: none
+// EXPORTS: WriteWSMessage, WriteWSFrame, WriteErrorResponse, WriteFSResponse, WriteFSStreamResponse, WriteStatResponse, WriteFSResponseWithTypes, WriteDataResponse, WriteExecResponse
 // DOCS: agent_chat/plan_luminka_stream_runtime_2026-04-01.md
 
 package luminka
@@ -14,42 +14,42 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func readWSFrame(conn *wsConnection) (int, wsMessage, []byte, error) {
+func readWSFrame(conn *WSConnection) (int, WSMessage, []byte, error) {
 	if conn == nil || conn.conn == nil {
-		return 0, wsMessage{}, nil, fmt.Errorf("websocket connection is required")
+		return 0, WSMessage{}, nil, fmt.Errorf("websocket connection is required")
 	}
 	msgType, data, err := conn.conn.ReadMessage()
 	if err != nil {
-		return 0, wsMessage{}, nil, err
+		return 0, WSMessage{}, nil, err
 	}
 	switch msgType {
 	case websocket.BinaryMessage:
 		// Normal binary frame — parse as Luminka protocol
-		var request wsMessage
+		var request WSMessage
 		payload, err := decodeFrame(data, &request)
 		if err != nil {
-			return msgType, wsMessage{}, nil, err
+			return msgType, WSMessage{}, nil, err
 		}
 		return msgType, request, payload, nil
 	case websocket.CloseMessage:
-		return msgType, wsMessage{}, nil, io.EOF
+		return msgType, WSMessage{}, nil, io.EOF
 	case websocket.PingMessage:
 		// Auto-respond with Pong and skip silently
 		if pingConn, ok := conn.conn.(*websocket.Conn); ok {
 			_ = pingConn.WriteMessage(websocket.PongMessage, nil)
 		}
-		return msgType, wsMessage{}, nil, nil
+		return msgType, WSMessage{}, nil, nil
 	default:
 		// TextMessage or other — return the raw frame for the caller to reject
-		return msgType, wsMessage{}, nil, nil
+		return msgType, WSMessage{}, nil, nil
 	}
 }
 
-func writeWSMessage(conn *wsConnection, message wsMessage) error {
-	return writeWSFrame(conn, message, nil)
+func WriteWSMessage(conn *WSConnection, message WSMessage) error {
+	return WriteWSFrame(conn, message, nil)
 }
 
-func writeWSFrame(conn *wsConnection, message wsMessage, payload []byte) error {
+func WriteWSFrame(conn *WSConnection, message WSMessage, payload []byte) error {
 	if conn == nil || conn.conn == nil {
 		return fmt.Errorf("websocket connection is required")
 	}
@@ -62,38 +62,38 @@ func writeWSFrame(conn *wsConnection, message wsMessage, payload []byte) error {
 	return conn.conn.WriteMessage(websocket.BinaryMessage, data)
 }
 
-func writeErrorResponse(conn *wsConnection, id json.RawMessage, message string) error {
-	return writeWSMessage(conn, wsMessage{Event: "error", ID: id, Error: message})
+func WriteErrorResponse(conn *WSConnection, id json.RawMessage, message string) error {
+	return WriteWSMessage(conn, WSMessage{Event: "response:error", ID: id, Error: message})
 }
 
-func writeFSResponse(conn *wsConnection, id json.RawMessage, ok bool, errMsg string, data *string, files []string, exists *bool) error {
-	response := wsMessage{Event: "fs_response", ID: id, Ok: boolPtr(ok), Error: errMsg, Files: files, Exists: exists}
+func WriteFSResponse(conn *WSConnection, requestEvent string, id json.RawMessage, ok bool, errMsg string, data *string, files []string, exists *bool) error {
+	response := WSMessage{Event: "response:" + requestEvent, ID: id, Ok: boolPtr(ok), Error: errMsg, Files: files, Exists: exists}
 	if data != nil {
 		response.Data = rawStringData(*data)
 	}
-	return writeWSMessage(conn, response)
+	return WriteWSMessage(conn, response)
 }
 
-func writeFSStreamResponse(conn *wsConnection, id json.RawMessage, ok bool, errMsg, streamID string) error {
-	return writeWSMessage(conn, wsMessage{Event: "fs_response", ID: id, Ok: boolPtr(ok), Error: errMsg, StreamID: streamID})
+func WriteFSStreamResponse(conn *WSConnection, requestEvent string, id json.RawMessage, ok bool, errMsg, streamID string) error {
+	return WriteWSMessage(conn, WSMessage{Event: "response:" + requestEvent, ID: id, Ok: boolPtr(ok), Error: errMsg, StreamID: streamID})
 }
 
-func writeExecResponse(conn *wsConnection, event string, id json.RawMessage, ok bool, errMsg, stdout, stderr string, code *int) error {
-	return writeWSMessage(conn, wsMessage{Event: event, ID: id, Ok: boolPtr(ok), Error: errMsg, Stdout: stdout, Stderr: stderr, Code: code})
+func WriteExecResponse(conn *WSConnection, event string, id json.RawMessage, ok bool, errMsg, stdout, stderr string, code *int) error {
+	return WriteWSMessage(conn, WSMessage{Event: event, ID: id, Ok: boolPtr(ok), Error: errMsg, Stdout: stdout, Stderr: stderr, Code: code})
 }
 
-func writeStatResponse(conn *wsConnection, id json.RawMessage, ok bool, errMsg string, stat map[string]any) error {
+func WriteStatResponse(conn *WSConnection, requestEvent string, id json.RawMessage, ok bool, errMsg string, stat map[string]any) error {
 	statData, err := json.Marshal(stat)
 	if err != nil {
-		return writeFSResponse(conn, id, false, "failed to marshal stat", nil, nil, nil)
+		return WriteFSResponse(conn, requestEvent, id, false, "failed to marshal stat", nil, nil, nil)
 	}
-	return writeWSMessage(conn, wsMessage{Event: "fs_response", ID: id, Ok: boolPtr(ok), Error: errMsg, Stat: statData})
+	return WriteWSMessage(conn, WSMessage{Event: "response:" + requestEvent, ID: id, Ok: boolPtr(ok), Error: errMsg, Stat: statData})
 }
 
-func writeFSResponseWithTypes(conn *wsConnection, id json.RawMessage, ok bool, errMsg string, files, fileTypes []string) error {
-	return writeWSMessage(conn, wsMessage{Event: "fs_response", ID: id, Ok: boolPtr(ok), Error: errMsg, Files: files, FileTypes: fileTypes})
+func WriteFSResponseWithTypes(conn *WSConnection, requestEvent string, id json.RawMessage, ok bool, errMsg string, files, fileTypes []string) error {
+	return WriteWSMessage(conn, WSMessage{Event: "response:" + requestEvent, ID: id, Ok: boolPtr(ok), Error: errMsg, Files: files, FileTypes: fileTypes})
 }
 
-func writeDataResponse(conn *wsConnection, id json.RawMessage, ok bool, errMsg, data string) error {
-	return writeWSMessage(conn, wsMessage{Event: "fs_response", ID: id, Ok: boolPtr(ok), Error: errMsg, Data: rawStringData(data)})
+func WriteDataResponse(conn *WSConnection, requestEvent string, id json.RawMessage, ok bool, errMsg, data string) error {
+	return WriteWSMessage(conn, WSMessage{Event: "response:" + requestEvent, ID: id, Ok: boolPtr(ok), Error: errMsg, Data: rawStringData(data)})
 }

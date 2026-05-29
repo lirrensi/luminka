@@ -27,14 +27,14 @@ type streamRegistry struct {
 	mu           sync.Mutex
 	nextID       uint64
 	streams      map[string]*streamState
-	byConnection map[*wsConnection]map[string]struct{}
+	byConnection map[*WSConnection]map[string]struct{}
 }
 
 type streamState struct {
 	mu      sync.Mutex
 	id      string
 	kind    streamKind
-	conn    *wsConnection
+	conn    *WSConnection
 	file    *os.File
 	nextSeq uint64
 	closed  bool
@@ -43,23 +43,23 @@ type streamState struct {
 func newStreamRegistry() *streamRegistry {
 	return &streamRegistry{
 		streams:      make(map[string]*streamState),
-		byConnection: make(map[*wsConnection]map[string]struct{}),
+		byConnection: make(map[*WSConnection]map[string]struct{}),
 	}
 }
 
-func (sr *streamRegistry) registerRead(conn *wsConnection) *streamState {
+func (sr *streamRegistry) registerRead(conn *WSConnection) *streamState {
 	return sr.register(conn, streamKindRead)
 }
 
-func (sr *streamRegistry) registerWrite(conn *wsConnection) *streamState {
+func (sr *streamRegistry) registerWrite(conn *WSConnection) *streamState {
 	return sr.register(conn, streamKindWrite)
 }
 
-func (sr *streamRegistry) registerProcessOutput(conn *wsConnection) *streamState {
+func (sr *streamRegistry) registerProcessOutput(conn *WSConnection) *streamState {
 	return sr.register(conn, streamKindProcessOutput)
 }
 
-func (sr *streamRegistry) registerHandle(conn *wsConnection, file *os.File) *streamState {
+func (sr *streamRegistry) registerHandle(conn *WSConnection, file *os.File) *streamState {
 	if sr == nil || conn == nil || file == nil {
 		return nil
 	}
@@ -80,7 +80,7 @@ func (sr *streamRegistry) registerHandle(conn *wsConnection, file *os.File) *str
 	return state
 }
 
-func (sr *streamRegistry) register(conn *wsConnection, kind streamKind) *streamState {
+func (sr *streamRegistry) register(conn *WSConnection, kind streamKind) *streamState {
 	if sr == nil || conn == nil {
 		return nil
 	}
@@ -158,7 +158,7 @@ func (sr *streamRegistry) remove(id string) {
 	sr.removeLocked(id)
 }
 
-func (sr *streamRegistry) closeConnection(conn *wsConnection) []string {
+func (sr *streamRegistry) closeConnection(conn *WSConnection) []string {
 	if sr == nil || conn == nil {
 		return nil
 	}
@@ -187,7 +187,7 @@ func (sr *streamRegistry) closeAll() []string {
 	return ids
 }
 
-func (sr *streamRegistry) connectionIDsLocked(conn *wsConnection) []string {
+func (sr *streamRegistry) connectionIDsLocked(conn *WSConnection) []string {
 	ids := sr.byConnection[conn]
 	if len(ids) == 0 {
 		return nil
@@ -219,10 +219,10 @@ func (sr *streamRegistry) removeLocked(id string) {
 	}
 }
 
-func writeStreamChunk(conn *wsConnection, streamID string, seq uint64, lane string, payload []byte, eof bool, id json.RawMessage) error {
-	return writeWSFrame(conn, wsMessage{Event: "stream_chunk", StreamID: streamID, Seq: seq, Lane: lane, EOF: eof, ID: id}, payload)
+func writeStreamChunk(conn *WSConnection, streamID string, seq uint64, lane string, payload []byte, eof bool, id json.RawMessage) error {
+	return WriteWSFrame(conn, WSMessage{Event: "stream:chunk", StreamID: streamID, Seq: seq, Lane: lane, EOF: eof, ID: id}, payload)
 }
 
-func writeStreamClose(conn *wsConnection, id json.RawMessage, streamID string, ok bool, code *int, errMsg string) error {
-	return writeWSMessage(conn, wsMessage{Event: "stream_close", ID: id, StreamID: streamID, Ok: boolPtr(ok), Code: code, Error: errMsg})
+func writeStreamClose(conn *WSConnection, id json.RawMessage, streamID string, ok bool, code *int, errMsg string) error {
+	return WriteWSMessage(conn, WSMessage{Event: "stream:close", ID: id, StreamID: streamID, Ok: boolPtr(ok), Code: code, Error: errMsg})
 }

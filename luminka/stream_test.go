@@ -27,7 +27,7 @@ func TestNewStreamRegistry(t *testing.T) {
 
 func TestStreamRegistryRegisterRead(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 
 	s := sr.registerRead(conn)
 	if s == nil {
@@ -49,7 +49,7 @@ func TestStreamRegistryRegisterRead(t *testing.T) {
 
 func TestStreamRegistryRegisterWrite(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 
 	s := sr.registerWrite(conn)
 	if s == nil {
@@ -62,7 +62,7 @@ func TestStreamRegistryRegisterWrite(t *testing.T) {
 
 func TestStreamRegistryRegisterProcessOutput(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 
 	s := sr.registerProcessOutput(conn)
 	if s == nil {
@@ -75,7 +75,7 @@ func TestStreamRegistryRegisterProcessOutput(t *testing.T) {
 
 func TestStreamRegistryRegisterHandle(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 
 	// nil file → nil state
 	s := sr.registerHandle(conn, nil)
@@ -117,7 +117,7 @@ func TestStreamRegistryRegisterHandle(t *testing.T) {
 
 func TestStreamRegistryRegisterIDUniqueness(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 
 	s1 := sr.registerRead(conn)
 	s2 := sr.registerRead(conn)
@@ -135,7 +135,7 @@ func TestStreamRegistryRegisterIDUniqueness(t *testing.T) {
 
 func TestStreamRegistryLookup(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 
 	s := sr.registerRead(conn)
 
@@ -165,7 +165,7 @@ func TestStreamRegistryLookup(t *testing.T) {
 
 func TestStreamRegistryRemove(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 
 	s := sr.registerRead(conn)
 	sr.remove(s.id)
@@ -183,7 +183,7 @@ func TestStreamRegistryRemove(t *testing.T) {
 
 func TestStreamRegistryRemoveIdempotent(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 
 	s := sr.registerRead(conn)
 	sr.remove(s.id)
@@ -194,7 +194,7 @@ func TestStreamRegistryRemoveIdempotent(t *testing.T) {
 
 func TestStreamRegistryRemoveCleansByConnection(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 
 	s1 := sr.registerRead(conn)
 	_ = sr.registerWrite(conn)
@@ -211,8 +211,8 @@ func TestStreamRegistryRemoveCleansByConnection(t *testing.T) {
 
 func TestStreamRegistryCloseConnection(t *testing.T) {
 	sr := newStreamRegistry()
-	conn1 := &wsConnection{}
-	conn2 := &wsConnection{}
+	conn1 := &WSConnection{}
+	conn2 := &WSConnection{}
 
 	s1 := sr.registerRead(conn1)
 	s2 := sr.registerWrite(conn1)
@@ -239,12 +239,12 @@ func TestStreamRegistryCloseConnection(t *testing.T) {
 	}
 
 	// closeConnection on connection with no streams
-	sr.closeConnection(&wsConnection{})
+	sr.closeConnection(&WSConnection{})
 }
 
 func TestStreamRegistryCloseConnectionByConnectionCleanup(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 
 	sr.registerRead(conn)
 	sr.registerWrite(conn)
@@ -260,7 +260,7 @@ func TestStreamRegistryCloseConnectionByConnectionCleanup(t *testing.T) {
 
 func TestStreamRegistryCloseAll(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 
 	sr.registerRead(conn)
 	sr.registerWrite(conn)
@@ -285,7 +285,7 @@ func TestStreamRegistryCloseAll(t *testing.T) {
 
 func TestStreamRegistryCount(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 
 	if c := sr.count(); c != 0 {
 		t.Fatalf("count = %d, want 0", c)
@@ -312,16 +312,16 @@ func TestStreamRegistryCount(t *testing.T) {
 func TestStreamRegistryNilReceiver(t *testing.T) {
 	var sr *streamRegistry = nil
 
-	if s := sr.registerRead(&wsConnection{}); s != nil {
+	if s := sr.registerRead(&WSConnection{}); s != nil {
 		t.Fatal("nil registry registerRead should return nil")
 	}
-	if s := sr.registerWrite(&wsConnection{}); s != nil {
+	if s := sr.registerWrite(&WSConnection{}); s != nil {
 		t.Fatal("nil registry registerWrite should return nil")
 	}
-	if s := sr.registerProcessOutput(&wsConnection{}); s != nil {
+	if s := sr.registerProcessOutput(&WSConnection{}); s != nil {
 		t.Fatal("nil registry registerProcessOutput should return nil")
 	}
-	if s := sr.registerHandle(&wsConnection{}, &os.File{}); s != nil {
+	if s := sr.registerHandle(&WSConnection{}, &os.File{}); s != nil {
 		t.Fatal("nil registry registerHandle should return nil")
 	}
 	if s, ok := sr.lookup("x"); s != nil || ok {
@@ -332,7 +332,7 @@ func TestStreamRegistryNilReceiver(t *testing.T) {
 	}
 	// These should not panic
 	sr.remove("x")
-	sr.closeConnection(&wsConnection{})
+	sr.closeConnection(&WSConnection{})
 	sr.closeAll()
 }
 
@@ -354,7 +354,7 @@ func TestStreamStateNilReceiver(t *testing.T) {
 
 func TestStreamStateAttachFile(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 	s := sr.registerRead(conn)
 
 	if s.file != nil {
@@ -384,7 +384,7 @@ func TestStreamStateAttachFile(t *testing.T) {
 
 func TestStreamStateCloseResourceWithNilFile(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 	s := sr.registerRead(conn)
 
 	s.closeResource() // should not panic — file is nil
@@ -394,7 +394,7 @@ func TestStreamStateCloseResourceWithNilFile(t *testing.T) {
 
 func TestAcceptClientChunk(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 	s := sr.registerWrite(conn)
 
 	// first chunk at seq 0
@@ -416,7 +416,7 @@ func TestAcceptClientChunk(t *testing.T) {
 
 func TestAcceptClientChunkWrongSequence(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 	s := sr.registerWrite(conn)
 
 	// accept seq 0
@@ -434,7 +434,7 @@ func TestAcceptClientChunkWrongSequence(t *testing.T) {
 
 func TestAcceptClientChunkClosedStream(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 	s := sr.registerWrite(conn)
 
 	sr.remove(s.id)
@@ -451,7 +451,7 @@ func TestAcceptClientChunkClosedStream(t *testing.T) {
 func TestAcceptClientChunkZeroSequenceFromStart(t *testing.T) {
 	// Verifies chunk at seq 0 works (not just that it's the default)
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 	s := sr.registerRead(conn)
 
 	if err := s.acceptClientChunk(0); err != nil {
@@ -463,8 +463,8 @@ func TestAcceptClientChunkZeroSequenceFromStart(t *testing.T) {
 
 func TestStreamRegistryMultipleConnections(t *testing.T) {
 	sr := newStreamRegistry()
-	conn1 := &wsConnection{}
-	conn2 := &wsConnection{}
+	conn1 := &WSConnection{}
+	conn2 := &WSConnection{}
 
 	sr.registerRead(conn1)
 	sr.registerWrite(conn1)
@@ -498,7 +498,7 @@ func TestStreamRegistryConcurrentRegisterAndRemove(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			conn := &wsConnection{}
+			conn := &WSConnection{}
 			s := sr.registerRead(conn)
 			sr.lookup(s.id)
 			sr.remove(s.id)
@@ -509,7 +509,7 @@ func TestStreamRegistryConcurrentRegisterAndRemove(t *testing.T) {
 
 func TestStreamRegistryConcurrentReads(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 	s := sr.registerRead(conn)
 
 	var wg sync.WaitGroup
@@ -532,7 +532,7 @@ func TestStreamRegistryConcurrentMixedOperations(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			conn := &wsConnection{}
+			conn := &WSConnection{}
 			sr.registerRead(conn)
 			sr.registerWrite(conn)
 		}()
@@ -543,7 +543,7 @@ func TestStreamRegistryConcurrentMixedOperations(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			sr.count()
-			conn := &wsConnection{}
+			conn := &WSConnection{}
 			sr.registerProcessOutput(conn)
 		}()
 	}
@@ -570,7 +570,7 @@ func TestWriteStreamHelpersNilConn(t *testing.T) {
 
 func TestStreamRegistryLookupAfterCloseConnection(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 	s := sr.registerRead(conn)
 
 	sr.closeConnection(conn)
@@ -583,7 +583,7 @@ func TestStreamRegistryLookupAfterCloseConnection(t *testing.T) {
 
 func TestStreamRegistryRegisterDoesNotReuseIDs(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 
 	s1 := sr.registerRead(conn)
 	sr.remove(s1.id)
@@ -604,7 +604,7 @@ func TestStreamRegistryCloseAllEmpty(t *testing.T) {
 
 func TestStreamRegistryConnectionWithNoStreams(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 
 	// closeConnection on a connection with no registered streams
 	ids := sr.closeConnection(conn)
@@ -617,7 +617,7 @@ func TestStreamStateAcceptClientChunkAfterRemove(t *testing.T) {
 	// After remove, the stream is marked closed but acceptClientChunk
 	// still operates on the (now-closed) streamState pointer
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 	s := sr.registerRead(conn)
 
 	_ = s.acceptClientChunk(0)
@@ -635,7 +635,7 @@ func TestStreamStateAcceptClientChunkAfterRemove(t *testing.T) {
 
 func TestStreamRegistryRegisterConcurrentSameConnection(t *testing.T) {
 	sr := newStreamRegistry()
-	conn := &wsConnection{}
+	conn := &WSConnection{}
 	var wg sync.WaitGroup
 
 	for i := 0; i < 20; i++ {

@@ -31,6 +31,6 @@ func (sb *ShellBridge) Exec(cmd string, args []string, timeout time.Duration) (s
 	return "", "", -1, errors.New("shell support is not available in this build; rebuild with -tags shell")
 }
 
-func (sb *ShellBridge) ExecStream(rt *Runtime, conn *wsConnection, id json.RawMessage, cmd string, args []string, timeout time.Duration) error {
+func (sb *ShellBridge) ExecStream(rt *Runtime, conn *WSConnection, id json.RawMessage, cmd string, args []string, timeout time.Duration) error {
 	return errors.New("shell support is not available in this build; rebuild with -tags shell")
 }

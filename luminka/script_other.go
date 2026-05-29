@@ -33,6 +33,6 @@ func (sb *ScriptBridge) Exec(runner string, file string, args []string, timeout 
 	return "", "", -1, errors.New("script support is not available in this build; rebuild with -tags scripts")
 }
 
-func (sb *ScriptBridge) ExecStream(rt *Runtime, conn *wsConnection, id json.RawMessage, runner string, file string, args []string, timeout time.Duration) error {
+func (sb *ScriptBridge) ExecStream(rt *Runtime, conn *WSConnection, id json.RawMessage, runner string, file string, args []string, timeout time.Duration) error {
 	return errors.New("script support is not available in this build; rebuild with -tags scripts")
 }

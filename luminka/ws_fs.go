@@ -45,94 +45,94 @@ func flagToOpenFlags(flag string) (int, os.FileMode) {
 
 const fsStreamChunkSize = 32 * 1024
 
-func (rt *Runtime) handleFilesystemRequest(conn *wsConnection, request wsMessage, payload []byte) error {
+func (rt *Runtime) handleFilesystemRequest(conn *WSConnection, request WSMessage, payload []byte) error {
 	if rt == nil {
-		return writeErrorResponse(conn, request.ID, "runtime is required")
+		return WriteErrorResponse(conn, request.ID, "runtime is required")
 	}
 	if !rt.Capabilities.FS {
-		return writeFSResponse(conn, request.ID, false, "filesystem capability is disabled", nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, "filesystem capability is disabled", nil, nil, nil)
 	}
 	if rt.FSBridge == nil {
-		return writeFSResponse(conn, request.ID, false, "filesystem bridge is unavailable", nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, "filesystem bridge is unavailable", nil, nil, nil)
 	}
 
 	switch request.Event {
-	case "fs_read_text":
+	case "file:read_text":
 		data, err := rt.FSBridge.ReadBytes(request.Path)
 		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
 		text := string(data)
-		return writeFSResponse(conn, request.ID, true, "", &text, nil, nil)
-	case "fs_write_text":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", &text, nil, nil)
+	case "file:write_text":
 		if err := rt.FSBridge.WriteBytes(request.Path, []byte(request.dataString())); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
 		rt.logEvent("fs_write", map[string]any{"path": request.Path})
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_list":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:list":
 		files, err := rt.FSBridge.List(request.Path)
 		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, files, nil)
-	case "fs_delete":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, files, nil)
+	case "file:delete":
 		if err := rt.FSBridge.Delete(request.Path); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
 		rt.logEvent("fs_delete", map[string]any{"path": request.Path})
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_exists":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:exists":
 		exists, err := rt.FSBridge.Exists(request.Path)
 		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, boolPtr(exists))
-	case "fs_watch":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, boolPtr(exists))
+	case "file:watch":
 		if rt.Watcher == nil {
-			return writeFSResponse(conn, request.ID, false, "watcher is unavailable", nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, "watcher is unavailable", nil, nil, nil)
 		}
 		if err := rt.Watcher.Add(request.Path); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
 		rt.Watcher.Start()
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_unwatch":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:unwatch":
 		if rt.Watcher == nil {
-			return writeFSResponse(conn, request.ID, false, "watcher is unavailable", nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, "watcher is unavailable", nil, nil, nil)
 		}
 		if err := rt.Watcher.Remove(request.Path); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_open_read":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:open_read":
 		return rt.handleFSOpenRead(conn, request)
-	case "fs_open_write":
+	case "file:open_write":
 		return rt.handleFSOpenWrite(conn, request)
-	case "stream_chunk":
+	case "stream:chunk":
 		return rt.handleStreamChunk(conn, request, payload)
-	case "stream_close":
+	case "stream:close":
 		return rt.handleStreamClose(conn, request)
 	// --- New Node-style operations ---
-	case "fs_access":
+	case "file:access":
 		err := rt.FSBridge.Access(request.Path, os.FileMode(request.Perm))
 		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_append_file":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:append_file":
 		if err := rt.FSBridge.AppendFile(request.Path, payload); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_chmod":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:chmod":
 		if err := rt.FSBridge.Chmod(request.Path, os.FileMode(request.Perm)); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_copy_file":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:copy_file":
 		if err := rt.FSBridge.CopyFile(request.Src, request.Dest); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
 		if request.Perm != 0 {
 			resolved, err := rt.FSBridge.Realpath(request.Dest)
@@ -140,25 +140,25 @@ func (rt *Runtime) handleFilesystemRequest(conn *wsConnection, request wsMessage
 				_ = os.Chmod(resolved, os.FileMode(request.Perm))
 			}
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_cp":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:cp":
 		recursive := request.Flag == "recursive"
 		if err := rt.FSBridge.Cp(request.Src, request.Dest, recursive); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_link":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:link":
 		if err := rt.FSBridge.Link(request.Src, request.Dest); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_lstat":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:lstat":
 		info, err := rt.FSBridge.Lstat(request.Path)
 		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeStatResponse(conn, request.ID, true, "", statToMap(info))
-	case "fs_mkdir":
+		return WriteStatResponse(conn, request.Event, request.ID, true, "", statToMap(info))
+	case "file:mkdir":
 		perm := os.FileMode(request.Perm)
 		if perm == 0 {
 			perm = 0o755
@@ -170,49 +170,49 @@ func (rt *Runtime) handleFilesystemRequest(conn *wsConnection, request wsMessage
 			err = rt.FSBridge.Mkdir(request.Path, perm)
 		}
 		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_mkdtemp":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:mkdtemp":
 		path, err := rt.FSBridge.Mkdtemp(request.Path)
 		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeDataResponse(conn, request.ID, true, "", path)
-	case "fs_open":
+		return WriteDataResponse(conn, request.Event, request.ID, true, "", path)
+	case "file:open":
 		flags, perm := flagToOpenFlags(request.Flag)
 		if request.Perm != 0 {
 			perm = os.FileMode(request.Perm)
 		}
 		file, err := rt.FSBridge.Open(request.Path, flags, perm)
 		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
 		if rt.streams == nil {
 			file.Close()
-			return writeFSResponse(conn, request.ID, false, "stream registry is unavailable", nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, "stream registry is unavailable", nil, nil, nil)
 		}
 		stream := rt.streams.registerHandle(conn, file)
 		if stream == nil {
 			file.Close()
-			return writeFSResponse(conn, request.ID, false, "stream registry is unavailable", nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, "stream registry is unavailable", nil, nil, nil)
 		}
-		return writeFSStreamResponse(conn, request.ID, true, "", stream.id)
-	case "fs_read_file":
+		return WriteFSStreamResponse(conn, request.Event, request.ID, true, "", stream.id)
+	case "file:read_file":
 		data, err := rt.FSBridge.ReadBytes(request.Path)
 		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
 		if request.Flag == "utf8" {
 			text := string(data)
-			return writeFSResponse(conn, request.ID, true, "", &text, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, true, "", &text, nil, nil)
 		}
 		// Binary data: send as payload after JSON header
-		return writeWSFrame(conn, wsMessage{Event: "fs_response", ID: request.ID, Ok: boolPtr(true)}, data)
-	case "fs_readdir":
+		return WriteWSFrame(conn, WSMessage{Event: "response:" + request.Event, ID: request.ID, Ok: boolPtr(true)}, data)
+	case "file:readdir":
 		entries, err := rt.FSBridge.ReadDir(request.Path)
 		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
 		names := make([]string, 0, len(entries))
 		types := make([]string, 0, len(entries))
@@ -226,107 +226,107 @@ func (rt *Runtime) handleFilesystemRequest(conn *wsConnection, request wsMessage
 				types = append(types, "file")
 			}
 		}
-		return writeFSResponseWithTypes(conn, request.ID, true, "", names, types)
-	case "fs_readlink":
+		return WriteFSResponseWithTypes(conn, request.Event, request.ID, true, "", names, types)
+	case "file:readlink":
 		target, err := rt.FSBridge.Readlink(request.Path)
 		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeDataResponse(conn, request.ID, true, "", target)
-	case "fs_realpath":
+		return WriteDataResponse(conn, request.Event, request.ID, true, "", target)
+	case "file:realpath":
 		resolved, err := rt.FSBridge.Realpath(request.Path)
 		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeDataResponse(conn, request.ID, true, "", resolved)
-	case "fs_rename":
+		return WriteDataResponse(conn, request.Event, request.ID, true, "", resolved)
+	case "file:rename":
 		if err := rt.FSBridge.Rename(request.Path, request.Dest); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_rm":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:rm":
 		if request.Flag == "recursive" {
 			if err := rt.FSBridge.RemoveAll(request.Path); err != nil {
-				return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+				return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 			}
 		} else {
 			if err := rt.FSBridge.Remove(request.Path); err != nil {
-				return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+				return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 			}
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_rmdir":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:rmdir":
 		if err := rt.FSBridge.Rmdir(request.Path); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_stat":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:stat":
 		info, err := rt.FSBridge.Stat(request.Path)
 		if err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeStatResponse(conn, request.ID, true, "", statToMap(info))
-	case "fs_symlink":
+		return WriteStatResponse(conn, request.Event, request.ID, true, "", statToMap(info))
+	case "file:symlink":
 		if err := rt.FSBridge.Symlink(request.Src, request.Path); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_truncate":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:truncate":
 		if err := rt.FSBridge.Truncate(request.Path, request.Len); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_unlink":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:unlink":
 		if err := rt.FSBridge.Remove(request.Path); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_utimes":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:utimes":
 		atime, atimeErr := time.Parse(time.RFC3339Nano, request.Atime)
 		mtime, mtimeErr := time.Parse(time.RFC3339Nano, request.Mtime)
 		if atimeErr != nil || mtimeErr != nil {
 			// Try Unix timestamps
 			var atimeSec, mtimeSec int64
 			if _, err := fmt.Sscanf(request.Atime, "%d", &atimeSec); err != nil {
-				return writeFSResponse(conn, request.ID, false, "invalid atime: "+err.Error(), nil, nil, nil)
+				return WriteFSResponse(conn, request.Event, request.ID, false, "invalid atime: "+err.Error(), nil, nil, nil)
 			}
 			if _, err := fmt.Sscanf(request.Mtime, "%d", &mtimeSec); err != nil {
-				return writeFSResponse(conn, request.ID, false, "invalid mtime: "+err.Error(), nil, nil, nil)
+				return WriteFSResponse(conn, request.Event, request.ID, false, "invalid mtime: "+err.Error(), nil, nil, nil)
 			}
 			atime = time.Unix(atimeSec, 0)
 			mtime = time.Unix(mtimeSec, 0)
 		}
 		if err := rt.FSBridge.Utimes(request.Path, atime, mtime); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
-	case "fs_write_file":
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
+	case "file:write_file":
 		if err := rt.FSBridge.WriteBytes(request.Path, payload); err != nil {
-			return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 		}
 		rt.logEvent("fs_write", map[string]any{"path": request.Path})
-		return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
 	// --- Handle operations ---
-	case "handle_read":
+	case "handle:read":
 		return rt.handleHandleRead(conn, request)
-	case "handle_write":
+	case "handle:write":
 		return rt.handleHandleWrite(conn, request, payload)
-	case "handle_close":
+	case "handle:close":
 		return rt.handleHandleClose(conn, request)
-	case "handle_stat":
+	case "handle:stat":
 		return rt.handleHandleStat(conn, request)
-	case "handle_truncate":
+	case "handle:truncate":
 		return rt.handleHandleTruncate(conn, request)
-	case "handle_sync":
+	case "handle:sync":
 		return rt.handleHandleSync(conn, request)
-	case "handle_datasync":
+	case "handle:datasync":
 		return rt.handleHandleDatasync(conn, request)
-	case "handle_chmod":
+	case "handle:chmod":
 		return rt.handleHandleChmod(conn, request)
-	case "handle_utimes":
+	case "handle:utimes":
 		return rt.handleHandleUtimes(conn, request)
 	default:
-		return writeErrorResponse(conn, request.ID, fmt.Sprintf("unknown event %q", request.Event))
+		return WriteErrorResponse(conn, request.ID, fmt.Sprintf("unknown event %q", request.Event))
 	}
 }
 
@@ -334,21 +334,21 @@ func (rt *Runtime) handleFilesystemRequest(conn *wsConnection, request wsMessage
 // Prefer the streaming API (fs_open with stream_chunk) for large files or
 // when cancellation is needed. This handler blocks the WebSocket message
 // loop for the entire duration of the read.
-func (rt *Runtime) handleFSOpenRead(conn *wsConnection, request wsMessage) error {
+func (rt *Runtime) handleFSOpenRead(conn *WSConnection, request WSMessage) error {
 	if rt.streams == nil {
-		return writeFSResponse(conn, request.ID, false, "stream registry is unavailable", nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, "stream registry is unavailable", nil, nil, nil)
 	}
 	stream := rt.streams.registerRead(conn)
 	if stream == nil {
-		return writeFSResponse(conn, request.ID, false, "stream registry is unavailable", nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, "stream registry is unavailable", nil, nil, nil)
 	}
 	file, _, err := rt.FSBridge.OpenRead(request.Path)
 	if err != nil {
 		rt.streams.remove(stream.id)
-		return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 	}
 	stream.attachFile(file)
-	if err := writeFSStreamResponse(conn, request.ID, true, "", stream.id); err != nil {
+	if err := WriteFSStreamResponse(conn, request.Event, request.ID, true, "", stream.id); err != nil {
 		rt.streams.remove(stream.id)
 		return err
 	}
@@ -375,53 +375,53 @@ func (rt *Runtime) handleFSOpenRead(conn *wsConnection, request wsMessage) error
 	return writeStreamClose(conn, nil, stream.id, true, nil, "")
 }
 
-func (rt *Runtime) handleFSOpenWrite(conn *wsConnection, request wsMessage) error {
+func (rt *Runtime) handleFSOpenWrite(conn *WSConnection, request WSMessage) error {
 	if rt.streams == nil {
-		return writeFSResponse(conn, request.ID, false, "stream registry is unavailable", nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, "stream registry is unavailable", nil, nil, nil)
 	}
 	stream := rt.streams.registerWrite(conn)
 	if stream == nil {
-		return writeFSResponse(conn, request.ID, false, "stream registry is unavailable", nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, "stream registry is unavailable", nil, nil, nil)
 	}
 	file, err := rt.FSBridge.OpenWrite(request.Path)
 	if err != nil {
 		rt.streams.remove(stream.id)
-		return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 	}
 	stream.attachFile(file)
-	if err := writeFSStreamResponse(conn, request.ID, true, "", stream.id); err != nil {
+	if err := WriteFSStreamResponse(conn, request.Event, request.ID, true, "", stream.id); err != nil {
 		rt.streams.remove(stream.id)
 		return err
 	}
 	return nil
 }
 
-func (rt *Runtime) handleStreamChunk(conn *wsConnection, request wsMessage, payload []byte) error {
+func (rt *Runtime) handleStreamChunk(conn *WSConnection, request WSMessage, payload []byte) error {
 	if rt.streams == nil {
-		return writeErrorResponse(conn, request.ID, "stream registry is unavailable")
+		return WriteErrorResponse(conn, request.ID, "stream registry is unavailable")
 	}
 	stream, ok := rt.streams.lookup(request.StreamID)
 	if !ok || stream == nil {
-		return writeErrorResponse(conn, request.ID, fmt.Sprintf("stream %q is not open", request.StreamID))
+		return WriteErrorResponse(conn, request.ID, fmt.Sprintf("stream %q is not open", request.StreamID))
 	}
 	if stream.conn != conn {
-		return writeErrorResponse(conn, request.ID, "stream not owned by this connection")
+		return WriteErrorResponse(conn, request.ID, "stream not owned by this connection")
 	}
 	if stream.kind != streamKindWrite {
-		return writeErrorResponse(conn, request.ID, fmt.Sprintf("stream %q is not writable", request.StreamID))
+		return WriteErrorResponse(conn, request.ID, fmt.Sprintf("stream %q is not writable", request.StreamID))
 	}
 	// Check payload before advancing sequence — empty payload is a no-op.
 	if len(payload) == 0 {
 		return nil
 	}
 	if err := stream.acceptClientChunk(request.Seq); err != nil {
-		return writeErrorResponse(conn, request.ID, err.Error())
+		return WriteErrorResponse(conn, request.ID, err.Error())
 	}
 	// Lock per-stream mutex to protect file access.
 	stream.mu.Lock()
 	if stream.file == nil {
 		stream.mu.Unlock()
-		return writeErrorResponse(conn, request.ID, fmt.Sprintf("stream %q is not writable", request.StreamID))
+		return WriteErrorResponse(conn, request.ID, fmt.Sprintf("stream %q is not writable", request.StreamID))
 	}
 	if _, err := stream.file.Write(payload); err != nil {
 		stream.mu.Unlock()
@@ -432,7 +432,7 @@ func (rt *Runtime) handleStreamChunk(conn *wsConnection, request wsMessage, payl
 	return nil
 }
 
-func (rt *Runtime) handleStreamClose(conn *wsConnection, request wsMessage) error {
+func (rt *Runtime) handleStreamClose(conn *WSConnection, request WSMessage) error {
 	if rt.streams == nil {
 		return writeStreamClose(conn, request.ID, request.StreamID, false, nil, "stream registry is unavailable")
 	}
@@ -453,16 +453,16 @@ func (rt *Runtime) handleStreamClose(conn *wsConnection, request wsMessage) erro
 
 // --- Handle operation handlers ---
 
-func (rt *Runtime) handleHandleRead(conn *wsConnection, request wsMessage) error {
+func (rt *Runtime) handleHandleRead(conn *WSConnection, request WSMessage) error {
 	if rt.streams == nil {
-		return writeErrorResponse(conn, request.ID, "stream registry is unavailable")
+		return WriteErrorResponse(conn, request.ID, "stream registry is unavailable")
 	}
 	stream, ok := rt.streams.lookup(request.StreamID)
 	if !ok || stream == nil || stream.file == nil {
-		return writeErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
+		return WriteErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
 	}
 	if stream.conn != conn {
-		return writeErrorResponse(conn, request.ID, "stream not owned by this connection")
+		return WriteErrorResponse(conn, request.ID, "stream not owned by this connection")
 	}
 
 	stream.mu.Lock()
@@ -497,7 +497,7 @@ func (rt *Runtime) handleHandleRead(conn *wsConnection, request wsMessage) error
 	case hasOffset && !hasLength:
 		// Seek to offset, then ReadAll
 		if _, err := stream.file.Seek(*offset, 0); err != nil {
-			return writeFSResponse(conn, request.ID, false, fmt.Sprintf("seek: %v", err), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, fmt.Sprintf("seek: %v", err), nil, nil, nil)
 		}
 		data, readErr = io.ReadAll(stream.file)
 	case !hasOffset && hasLength:
@@ -509,69 +509,69 @@ func (rt *Runtime) handleHandleRead(conn *wsConnection, request wsMessage) error
 	default:
 		// ReadAll from position 0 (legacy/stream behavior — matches Node.js filehandle.readFile)
 		if _, err := stream.file.Seek(0, 0); err != nil {
-			return writeFSResponse(conn, request.ID, false, fmt.Sprintf("seek: %v", err), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, fmt.Sprintf("seek: %v", err), nil, nil, nil)
 		}
 		data, readErr = io.ReadAll(stream.file)
 	}
 
 	if readErr != nil && readErr != io.EOF {
-		return writeFSResponse(conn, request.ID, false, fmt.Sprintf("read: %v", readErr), nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, fmt.Sprintf("read: %v", readErr), nil, nil, nil)
 	}
 
 	if len(data) > 0 {
-		return writeWSFrame(conn, wsMessage{Event: "fs_response", ID: request.ID, Ok: boolPtr(true), StreamID: stream.id}, data)
+		return WriteWSFrame(conn, WSMessage{Event: "response:" + request.Event, ID: request.ID, Ok: boolPtr(true), StreamID: stream.id}, data)
 	}
-	return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
+	return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
 }
 
-func (rt *Runtime) handleHandleChmod(conn *wsConnection, request wsMessage) error {
+func (rt *Runtime) handleHandleChmod(conn *WSConnection, request WSMessage) error {
 	if rt.streams == nil {
-		return writeErrorResponse(conn, request.ID, "stream registry is unavailable")
+		return WriteErrorResponse(conn, request.ID, "stream registry is unavailable")
 	}
 	stream, ok := rt.streams.lookup(request.StreamID)
 	if !ok || stream == nil || stream.file == nil {
-		return writeErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
+		return WriteErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
 	}
 	if stream.conn != conn {
-		return writeErrorResponse(conn, request.ID, "stream not owned by this connection")
+		return WriteErrorResponse(conn, request.ID, "stream not owned by this connection")
 	}
 	stream.mu.Lock()
 	path := stream.file.Name()
 	stream.mu.Unlock()
 	if path == "" {
-		return writeFSResponse(conn, request.ID, false, "cannot determine file path", nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, "cannot determine file path", nil, nil, nil)
 	}
 	// Convert absolute path to relative for FSBridge
 	rel, err := filepath.Rel(rt.Root, path)
 	if err != nil {
-		return writeFSResponse(conn, request.ID, false, fmt.Sprintf("path outside root: %v", err), nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, fmt.Sprintf("path outside root: %v", err), nil, nil, nil)
 	}
 	if err := rt.FSBridge.Chmod(rel, os.FileMode(request.Perm)); err != nil {
-		return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 	}
-	return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
+	return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
 }
 
-func (rt *Runtime) handleHandleUtimes(conn *wsConnection, request wsMessage) error {
+func (rt *Runtime) handleHandleUtimes(conn *WSConnection, request WSMessage) error {
 	if rt.streams == nil {
-		return writeErrorResponse(conn, request.ID, "stream registry is unavailable")
+		return WriteErrorResponse(conn, request.ID, "stream registry is unavailable")
 	}
 	stream, ok := rt.streams.lookup(request.StreamID)
 	if !ok || stream == nil || stream.file == nil {
-		return writeErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
+		return WriteErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
 	}
 	if stream.conn != conn {
-		return writeErrorResponse(conn, request.ID, "stream not owned by this connection")
+		return WriteErrorResponse(conn, request.ID, "stream not owned by this connection")
 	}
 	atime, atimeErr := time.Parse(time.RFC3339Nano, request.Atime)
 	mtime, mtimeErr := time.Parse(time.RFC3339Nano, request.Mtime)
 	if atimeErr != nil || mtimeErr != nil {
 		var atimeSec, mtimeSec int64
 		if _, err := fmt.Sscanf(request.Atime, "%d", &atimeSec); err != nil {
-			return writeFSResponse(conn, request.ID, false, "invalid atime: "+err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, "invalid atime: "+err.Error(), nil, nil, nil)
 		}
 		if _, err := fmt.Sscanf(request.Mtime, "%d", &mtimeSec); err != nil {
-			return writeFSResponse(conn, request.ID, false, "invalid mtime: "+err.Error(), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, "invalid mtime: "+err.Error(), nil, nil, nil)
 		}
 		atime = time.Unix(atimeSec, 0)
 		mtime = time.Unix(mtimeSec, 0)
@@ -580,29 +580,29 @@ func (rt *Runtime) handleHandleUtimes(conn *wsConnection, request wsMessage) err
 	path := stream.file.Name()
 	stream.mu.Unlock()
 	if path == "" {
-		return writeFSResponse(conn, request.ID, false, "cannot determine file path", nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, "cannot determine file path", nil, nil, nil)
 	}
 	// Convert absolute path to relative for FSBridge
 	rel, err := filepath.Rel(rt.Root, path)
 	if err != nil {
-		return writeFSResponse(conn, request.ID, false, fmt.Sprintf("path outside root: %v", err), nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, fmt.Sprintf("path outside root: %v", err), nil, nil, nil)
 	}
 	if err := rt.FSBridge.Utimes(rel, atime, mtime); err != nil {
-		return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 	}
-	return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
+	return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
 }
 
-func (rt *Runtime) handleHandleWrite(conn *wsConnection, request wsMessage, payload []byte) error {
+func (rt *Runtime) handleHandleWrite(conn *WSConnection, request WSMessage, payload []byte) error {
 	if rt.streams == nil {
-		return writeErrorResponse(conn, request.ID, "stream registry is unavailable")
+		return WriteErrorResponse(conn, request.ID, "stream registry is unavailable")
 	}
 	stream, ok := rt.streams.lookup(request.StreamID)
 	if !ok || stream == nil || stream.file == nil {
-		return writeErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
+		return WriteErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
 	}
 	if stream.conn != conn {
-		return writeErrorResponse(conn, request.ID, "stream not owned by this connection")
+		return WriteErrorResponse(conn, request.ID, "stream not owned by this connection")
 	}
 
 	stream.mu.Lock()
@@ -618,64 +618,64 @@ func (rt *Runtime) handleHandleWrite(conn *wsConnection, request wsMessage, payl
 	if offset != nil {
 		// Explicit positional write (WriteAt)
 		if _, err := stream.file.WriteAt(payload, *offset); err != nil {
-			return writeFSResponse(conn, request.ID, false, fmt.Sprintf("write: %v", err), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, fmt.Sprintf("write: %v", err), nil, nil, nil)
 		}
 	} else {
 		// Append write (Write)
 		if _, err := stream.file.Write(payload); err != nil {
-			return writeFSResponse(conn, request.ID, false, fmt.Sprintf("write: %v", err), nil, nil, nil)
+			return WriteFSResponse(conn, request.Event, request.ID, false, fmt.Sprintf("write: %v", err), nil, nil, nil)
 		}
 	}
-	return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
+	return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
 }
 
-func (rt *Runtime) handleHandleClose(conn *wsConnection, request wsMessage) error {
+func (rt *Runtime) handleHandleClose(conn *WSConnection, request WSMessage) error {
 	if rt.streams == nil {
-		return writeErrorResponse(conn, request.ID, "stream registry is unavailable")
+		return WriteErrorResponse(conn, request.ID, "stream registry is unavailable")
 	}
 	stream, ok := rt.streams.lookup(request.StreamID)
 	if !ok || stream == nil {
-		return writeErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
+		return WriteErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
 	}
 	if stream.conn != conn {
-		return writeErrorResponse(conn, request.ID, "stream not owned by this connection")
+		return WriteErrorResponse(conn, request.ID, "stream not owned by this connection")
 	}
 	// Lock to safely get id before removeLocked takes the per-stream lock.
 	// remove() will acquire registry + per-stream locks internally.
 	rt.streams.remove(stream.id)
-	return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
+	return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
 }
 
-func (rt *Runtime) handleHandleStat(conn *wsConnection, request wsMessage) error {
+func (rt *Runtime) handleHandleStat(conn *WSConnection, request WSMessage) error {
 	if rt.streams == nil {
-		return writeErrorResponse(conn, request.ID, "stream registry is unavailable")
+		return WriteErrorResponse(conn, request.ID, "stream registry is unavailable")
 	}
 	stream, ok := rt.streams.lookup(request.StreamID)
 	if !ok || stream == nil || stream.file == nil {
-		return writeErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
+		return WriteErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
 	}
 	if stream.conn != conn {
-		return writeErrorResponse(conn, request.ID, "stream not owned by this connection")
+		return WriteErrorResponse(conn, request.ID, "stream not owned by this connection")
 	}
 	stream.mu.Lock()
 	info, err := stream.file.Stat()
 	stream.mu.Unlock()
 	if err != nil {
-		return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 	}
-	return writeStatResponse(conn, request.ID, true, "", statToMap(info))
+	return WriteStatResponse(conn, request.Event, request.ID, true, "", statToMap(info))
 }
 
-func (rt *Runtime) handleHandleTruncate(conn *wsConnection, request wsMessage) error {
+func (rt *Runtime) handleHandleTruncate(conn *WSConnection, request WSMessage) error {
 	if rt.streams == nil {
-		return writeErrorResponse(conn, request.ID, "stream registry is unavailable")
+		return WriteErrorResponse(conn, request.ID, "stream registry is unavailable")
 	}
 	stream, ok := rt.streams.lookup(request.StreamID)
 	if !ok || stream == nil || stream.file == nil {
-		return writeErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
+		return WriteErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
 	}
 	if stream.conn != conn {
-		return writeErrorResponse(conn, request.ID, "stream not owned by this connection")
+		return WriteErrorResponse(conn, request.ID, "stream not owned by this connection")
 	}
 	truncLen := request.Len
 	if request.Length != nil {
@@ -685,47 +685,47 @@ func (rt *Runtime) handleHandleTruncate(conn *wsConnection, request wsMessage) e
 	err := stream.file.Truncate(truncLen)
 	stream.mu.Unlock()
 	if err != nil {
-		return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 	}
-	return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
+	return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
 }
 
-func (rt *Runtime) handleHandleSync(conn *wsConnection, request wsMessage) error {
+func (rt *Runtime) handleHandleSync(conn *WSConnection, request WSMessage) error {
 	if rt.streams == nil {
-		return writeErrorResponse(conn, request.ID, "stream registry is unavailable")
+		return WriteErrorResponse(conn, request.ID, "stream registry is unavailable")
 	}
 	stream, ok := rt.streams.lookup(request.StreamID)
 	if !ok || stream == nil || stream.file == nil {
-		return writeErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
+		return WriteErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
 	}
 	if stream.conn != conn {
-		return writeErrorResponse(conn, request.ID, "stream not owned by this connection")
+		return WriteErrorResponse(conn, request.ID, "stream not owned by this connection")
 	}
 	stream.mu.Lock()
 	err := stream.file.Sync()
 	stream.mu.Unlock()
 	if err != nil {
-		return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 	}
-	return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
+	return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
 }
 
-func (rt *Runtime) handleHandleDatasync(conn *wsConnection, request wsMessage) error {
+func (rt *Runtime) handleHandleDatasync(conn *WSConnection, request WSMessage) error {
 	if rt.streams == nil {
-		return writeErrorResponse(conn, request.ID, "stream registry is unavailable")
+		return WriteErrorResponse(conn, request.ID, "stream registry is unavailable")
 	}
 	stream, ok := rt.streams.lookup(request.StreamID)
 	if !ok || stream == nil || stream.file == nil {
-		return writeErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
+		return WriteErrorResponse(conn, request.ID, fmt.Sprintf("handle %q is not open", request.StreamID))
 	}
 	if stream.conn != conn {
-		return writeErrorResponse(conn, request.ID, "stream not owned by this connection")
+		return WriteErrorResponse(conn, request.ID, "stream not owned by this connection")
 	}
 	stream.mu.Lock()
 	err := fdatasync(stream.file)
 	stream.mu.Unlock()
 	if err != nil {
-		return writeFSResponse(conn, request.ID, false, err.Error(), nil, nil, nil)
+		return WriteFSResponse(conn, request.Event, request.ID, false, err.Error(), nil, nil, nil)
 	}
-	return writeFSResponse(conn, request.ID, true, "", nil, nil, nil)
+	return WriteFSResponse(conn, request.Event, request.ID, true, "", nil, nil, nil)
 }

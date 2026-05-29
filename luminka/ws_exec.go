@@ -6,15 +6,15 @@
 
 package luminka
 
-func (rt *Runtime) handleScriptStreamRequest(conn *wsConnection, request wsMessage) error {
+func (rt *Runtime) handleScriptStreamRequest(conn *WSConnection, request WSMessage) error {
 	if rt == nil {
-		return writeErrorResponse(conn, request.ID, "runtime is required")
+		return WriteErrorResponse(conn, request.ID, "runtime is required")
 	}
 	if !rt.Capabilities.Scripts {
-		return writeExecResponse(conn, "script_response", request.ID, false, "script capability is disabled", "", "", nil)
+		return WriteExecResponse(conn, "response:script:exec", request.ID, false, "script capability is disabled", "", "", nil)
 	}
 	if rt.ScriptBridge == nil {
-		return writeExecResponse(conn, "script_response", request.ID, false, "script bridge is unavailable", "", "", nil)
+		return WriteExecResponse(conn, "response:script:exec", request.ID, false, "script bridge is unavailable", "", "", nil)
 	}
 	if err := rt.ScriptBridge.ExecStream(rt, conn, request.ID, request.Runner, request.File, request.Args, requestTimeout(request.Timeout)); err != nil {
 		rt.logEvent("script_exec", map[string]any{
@@ -23,7 +23,7 @@ func (rt *Runtime) handleScriptStreamRequest(conn *wsConnection, request wsMessa
 			"ok":     false,
 			"stream": true,
 		})
-		return writeExecResponse(conn, "script_response", request.ID, false, err.Error(), "", "", nil)
+		return WriteExecResponse(conn, "response:script:exec", request.ID, false, err.Error(), "", "", nil)
 	}
 	rt.logEvent("script_exec", map[string]any{
 		"runner": request.Runner,
@@ -34,15 +34,15 @@ func (rt *Runtime) handleScriptStreamRequest(conn *wsConnection, request wsMessa
 	return nil
 }
 
-func (rt *Runtime) handleShellStreamRequest(conn *wsConnection, request wsMessage) error {
+func (rt *Runtime) handleShellStreamRequest(conn *WSConnection, request WSMessage) error {
 	if rt == nil {
-		return writeErrorResponse(conn, request.ID, "runtime is required")
+		return WriteErrorResponse(conn, request.ID, "runtime is required")
 	}
 	if !rt.Capabilities.Shell {
-		return writeExecResponse(conn, "shell_response", request.ID, false, "shell capability is disabled", "", "", nil)
+		return WriteExecResponse(conn, "response:shell:exec", request.ID, false, "shell capability is disabled", "", "", nil)
 	}
 	if rt.ShellBridge == nil {
-		return writeExecResponse(conn, "shell_response", request.ID, false, "shell bridge is unavailable", "", "", nil)
+		return WriteExecResponse(conn, "response:shell:exec", request.ID, false, "shell bridge is unavailable", "", "", nil)
 	}
 	if err := rt.ShellBridge.ExecStream(rt, conn, request.ID, request.Cmd, request.Args, requestTimeout(request.Timeout)); err != nil {
 		rt.logEvent("shell_exec", map[string]any{
@@ -50,7 +50,7 @@ func (rt *Runtime) handleShellStreamRequest(conn *wsConnection, request wsMessag
 			"ok":     false,
 			"stream": true,
 		})
-		return writeExecResponse(conn, "shell_response", request.ID, false, err.Error(), "", "", nil)
+		return WriteExecResponse(conn, "response:shell:exec", request.ID, false, err.Error(), "", "", nil)
 	}
 	rt.logEvent("shell_exec", map[string]any{
 		"cmd":    request.Cmd,

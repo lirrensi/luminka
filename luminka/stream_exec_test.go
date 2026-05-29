@@ -19,7 +19,7 @@ import (
 
 func TestNewExecStreamWriter(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 
 	w := newExecStreamWriter(conn, "stream-1", nil)
 	if w == nil {
@@ -38,7 +38,7 @@ func TestNewExecStreamWriter(t *testing.T) {
 
 func TestExecStreamWriterWriteChunk(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 
 	w := newExecStreamWriter(conn, "stream-exec-1", nil)
 
@@ -54,8 +54,8 @@ func TestExecStreamWriterWriteChunk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeFrame error = %v", err)
 	}
-	if msg["event"] != "stream_chunk" {
-		t.Fatalf("event = %v, want stream_chunk", msg["event"])
+	if msg["event"] != "stream:chunk" {
+		t.Fatalf("event = %v, want stream:chunk", msg["event"])
 	}
 	if msg["stream_id"] != "stream-exec-1" {
 		t.Fatalf("stream_id = %v, want stream-exec-1", msg["stream_id"])
@@ -78,7 +78,7 @@ func TestExecStreamWriterWriteChunk(t *testing.T) {
 
 func TestExecStreamWriterWriteChunkIncrementsSeq(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 
 	w := newExecStreamWriter(conn, "stream-seq", nil)
 
@@ -106,7 +106,7 @@ func TestExecStreamWriterWriteChunkIncrementsSeq(t *testing.T) {
 
 func TestExecStreamWriterWriteChunkEOFFlag(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 
 	w := newExecStreamWriter(conn, "stream-eof", nil)
 
@@ -122,7 +122,7 @@ func TestExecStreamWriterWriteChunkEOFFlag(t *testing.T) {
 
 func TestExecStreamWriterWriteChunkLane(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 
 	w := newExecStreamWriter(conn, "stream-lane", nil)
 
@@ -138,7 +138,7 @@ func TestExecStreamWriterWriteChunkLane(t *testing.T) {
 
 func TestExecStreamWriterWriteChunkNilPayload(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 
 	w := newExecStreamWriter(conn, "stream-nil", nil)
 
@@ -174,7 +174,7 @@ func TestExecStreamWriterNilReceiver(t *testing.T) {
 
 func TestPumpReaderToStreamSmallRead(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 	w := newExecStreamWriter(conn, "stream-pump", nil)
 
 	// Use a reader that returns (data, io.EOF) in one call (like pipe close)
@@ -219,7 +219,7 @@ func (r *eofReader) Read(p []byte) (int, error) {
 
 func TestPumpReaderToStreamNilReader(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 	w := newExecStreamWriter(conn, "stream-pump-nil", nil)
 
 	errCh := make(chan error, 2)
@@ -240,7 +240,7 @@ func TestPumpReaderToStreamNilReader(t *testing.T) {
 
 func TestPumpReaderToStreamReadError(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 	w := newExecStreamWriter(conn, "stream-pump-err", nil)
 
 	errReader := &errorReader{err: io.ErrUnexpectedEOF}
@@ -270,7 +270,7 @@ func (r *errorReader) Read(p []byte) (int, error) {
 
 func TestPumpReaderToStreamExactChunkSize(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 	w := newExecStreamWriter(conn, "stream-exact", nil)
 
 	// Exactly one chunk size, delivered with io.EOF
@@ -309,7 +309,7 @@ func TestPumpReaderToStreamExactChunkSize(t *testing.T) {
 func TestPumpReaderToStreamWriteError(t *testing.T) {
 	// Use a closed connection so writes fail
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 	fconn.CloseInput() // close before writing
 
 	w := newExecStreamWriter(conn, "stream-write-err", nil)
@@ -406,7 +406,7 @@ func TestCommandExitCodeNil(t *testing.T) {
 
 func TestExecStreamWriterConcurrent(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 	w := newExecStreamWriter(conn, "stream-con", nil)
 
 	var wg sync.WaitGroup

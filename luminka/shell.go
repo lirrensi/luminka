@@ -71,7 +71,7 @@ func (sb *ShellBridge) Exec(cmd string, args []string, timeout time.Duration) (s
 	return stdout, stderr, code, err
 }
 
-func (sb *ShellBridge) ExecStream(rt *Runtime, conn *wsConnection, id json.RawMessage, cmd string, args []string, timeout time.Duration) error {
+func (sb *ShellBridge) ExecStream(rt *Runtime, conn *WSConnection, id json.RawMessage, cmd string, args []string, timeout time.Duration) error {
 	if sb == nil {
 		return errors.New("shell bridge is required")
 	}
@@ -149,7 +149,7 @@ func (sb *ShellBridge) ExecStream(rt *Runtime, conn *wsConnection, id json.RawMe
 			errText = waitErr.Error()
 		}
 	}
-	if err := writeWSMessage(conn, wsMessage{Event: "shell_response", ID: id, Ok: boolPtr(ok), Code: intPtr(code), Error: errText, StreamID: stream.id}); err != nil {
+	if err := WriteWSMessage(conn, WSMessage{Event: "response:shell:exec", ID: id, Ok: boolPtr(ok), Code: intPtr(code), Error: errText, StreamID: stream.id}); err != nil {
 		return err
 	}
 	return nil

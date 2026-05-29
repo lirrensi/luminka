@@ -24,19 +24,19 @@ func TestFilesystemStreamWriteAndReadRoundTrip(t *testing.T) {
 
 	payload := bytes.Repeat([]byte("0123456789abcdef"), (fsStreamChunkSize/16)+2)
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open_write", "id": "open-write", "path": "bytes/payload.bin"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open_write", "id": "open-write", "path": "bytes/payload.bin"})
 	writeAck, _ := mustReadWSFrame(t, conn)
 	writeStreamID, _ := writeAck["stream_id"].(string)
 	if writeStreamID == "" {
 		t.Fatal("fs_open_write ack missing stream_id")
 	}
 
-	mustWriteWSFrame(t, conn, map[string]any{"event": "stream_chunk", "stream_id": writeStreamID, "seq": 0}, payload[:fsStreamChunkSize])
-	mustWriteWSFrame(t, conn, map[string]any{"event": "stream_chunk", "stream_id": writeStreamID, "seq": 1}, payload[fsStreamChunkSize:])
-	mustWriteWS(t, conn, map[string]any{"event": "stream_close", "id": "write-close", "stream_id": writeStreamID})
-	assertWSOK(t, mustReadWS(t, conn), "stream_close", "write-close")
+	mustWriteWSFrame(t, conn, map[string]any{"event": "stream:chunk", "stream_id": writeStreamID, "seq": 0}, payload[:fsStreamChunkSize])
+	mustWriteWSFrame(t, conn, map[string]any{"event": "stream:chunk", "stream_id": writeStreamID, "seq": 1}, payload[fsStreamChunkSize:])
+	mustWriteWS(t, conn, map[string]any{"event": "stream:close", "id": "write-close", "stream_id": writeStreamID})
+	assertWSOK(t, mustReadWS(t, conn), "stream:close", "write-close")
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open_read", "id": "open-read", "path": "bytes/payload.bin"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open_read", "id": "open-read", "path": "bytes/payload.bin"})
 	readAck, _ := mustReadWSFrame(t, conn)
 	readStreamID, _ := readAck["stream_id"].(string)
 	if readStreamID == "" {
@@ -51,16 +51,16 @@ func TestFilesystemStreamWriteAndReadRoundTrip(t *testing.T) {
 		}
 		header, chunk := mustReadWSFrame(t, conn)
 		switch header["event"] {
-		case "stream_chunk":
+		case "stream:chunk":
 			if sid, _ := header["stream_id"].(string); sid != readStreamID {
 				t.Fatalf("stream_chunk stream_id = %q, want %q", sid, readStreamID)
 			}
 			got.Write(chunk)
-		case "stream_close":
+		case "stream:close":
 			if got := header["ok"]; got != true {
 				t.Fatalf("stream_close ok = %v, want true", got)
 			}
-			if got := header["event"]; got != "stream_close" {
+			if got := header["event"]; got != "stream:close" {
 				t.Fatalf("stream_close event = %v, want stream_close", got)
 			}
 			if sid, _ := header["stream_id"].(string); sid != readStreamID {
@@ -80,9 +80,9 @@ func TestFilesystemStreamOpenRejectsPathEscape(t *testing.T) {
 	root := t.TempDir()
 	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open_read", "id": "escape", "path": filepath.Join("..", "escape.bin")})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open_read", "id": "escape", "path": filepath.Join("..", "escape.bin")})
 	resp := mustReadWS(t, conn)
-	assertWSFailure(t, resp, "fs_response", "escape", "path escapes root")
+	assertWSFailure(t, resp, "response:file:open_read", "escape", "path escapes root")
 }
 
 // ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ func TestHandleWireRoundTrip(t *testing.T) {
 	}
 
 	// Open handle
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open", "id": "open1", "path": "handle_test.txt", "flag": "r+"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open", "id": "open1", "path": "handle_test.txt", "flag": "r+"})
 	openResp := mustReadWS(t, conn)
 	if ok, _ := openResp["ok"].(bool); !ok {
 		t.Fatalf("fs_open response ok = false: %v", openResp)
@@ -115,17 +115,17 @@ func TestHandleWireRoundTrip(t *testing.T) {
 	}
 
 	// Read from handle
-	mustWriteWS(t, conn, map[string]any{"event": "handle_read", "stream_id": handleID, "len": 0, "perm": 0})
+	mustWriteWS(t, conn, map[string]any{"event": "handle:read", "stream_id": handleID, "len": 0, "perm": 0})
 	readResp, readPayload := mustReadWSFrame(t, conn)
-	if readResp["event"] != "fs_response" || readResp["ok"] != true {
-		t.Fatalf("handle_read response = %v, want fs_response ok", readResp)
+	if readResp["event"] != "response:handle:read" || readResp["ok"] != true {
+		t.Fatalf("handle_read response = %v, want response:handle:read ok", readResp)
 	}
 	if string(readPayload) != content {
 		t.Fatalf("handle_read payload = %q, want %q", string(readPayload), content)
 	}
 
 	// Stat handle
-	mustWriteWS(t, conn, map[string]any{"event": "handle_stat", "stream_id": handleID})
+	mustWriteWS(t, conn, map[string]any{"event": "handle:stat", "stream_id": handleID})
 	statResp := mustReadWS(t, conn)
 	if ok, _ := statResp["ok"].(bool); !ok {
 		t.Fatalf("handle_stat response ok = false: %v", statResp)
@@ -139,14 +139,14 @@ func TestHandleWireRoundTrip(t *testing.T) {
 	}
 
 	// Truncate handle
-	mustWriteWS(t, conn, map[string]any{"event": "handle_truncate", "stream_id": handleID, "len": 5})
+	mustWriteWS(t, conn, map[string]any{"event": "handle:truncate", "stream_id": handleID, "len": 5})
 	truncResp := mustReadWS(t, conn)
 	if ok, _ := truncResp["ok"].(bool); !ok {
 		t.Fatalf("handle_truncate response ok = false: %v", truncResp)
 	}
 
 	// Read back truncated content
-	mustWriteWS(t, conn, map[string]any{"event": "handle_read", "stream_id": handleID, "len": 0, "perm": 0})
+	mustWriteWS(t, conn, map[string]any{"event": "handle:read", "stream_id": handleID, "len": 0, "perm": 0})
 	shortResp, shortPayload := mustReadWSFrame(t, conn)
 	if ok, _ := shortResp["ok"].(bool); !ok {
 		t.Fatalf("handle_read after truncate response ok = false: %v", shortResp)
@@ -157,28 +157,28 @@ func TestHandleWireRoundTrip(t *testing.T) {
 
 	// Write to handle (at position 0 via Seek handled by server when len=0)
 	writePayload := []byte("CHANGED")
-	mustWriteWSFrame(t, conn, map[string]any{"event": "handle_write", "stream_id": handleID, "len": 0}, writePayload)
+	mustWriteWSFrame(t, conn, map[string]any{"event": "handle:write", "stream_id": handleID, "len": 0}, writePayload)
 	writeResp := mustReadWS(t, conn)
 	if ok, _ := writeResp["ok"].(bool); !ok {
 		t.Fatalf("handle_write response ok = false: %v", writeResp)
 	}
 
 	// Sync handle
-	mustWriteWS(t, conn, map[string]any{"event": "handle_sync", "stream_id": handleID})
+	mustWriteWS(t, conn, map[string]any{"event": "handle:sync", "stream_id": handleID})
 	syncResp := mustReadWS(t, conn)
 	if ok, _ := syncResp["ok"].(bool); !ok {
 		t.Fatalf("handle_sync response ok = false: %v", syncResp)
 	}
 
 	// Close handle
-	mustWriteWS(t, conn, map[string]any{"event": "handle_close", "stream_id": handleID})
+	mustWriteWS(t, conn, map[string]any{"event": "handle:close", "stream_id": handleID})
 	closeResp := mustReadWS(t, conn)
 	if ok, _ := closeResp["ok"].(bool); !ok {
 		t.Fatalf("handle_close response ok = false: %v", closeResp)
 	}
 
 	// Read from closed handle should error
-	mustWriteWS(t, conn, map[string]any{"event": "handle_read", "stream_id": handleID, "len": 0, "perm": 0})
+	mustWriteWS(t, conn, map[string]any{"event": "handle:read", "stream_id": handleID, "len": 0, "perm": 0})
 	closedResp := mustReadWS(t, conn)
 	if ok, _ := closedResp["ok"].(bool); ok {
 		t.Fatal("handle_read on closed handle returned ok=true, want error")
@@ -206,7 +206,7 @@ func TestHandleChmodUtimesWire(t *testing.T) {
 	}
 
 	// Open handle
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open", "id": "open-chmod", "path": "perm_test.txt", "flag": "r+"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open", "id": "open-chmod", "path": "perm_test.txt", "flag": "r+"})
 	openResp := mustReadWS(t, conn)
 	handleID, _ := openResp["stream_id"].(string)
 	if handleID == "" {
@@ -217,21 +217,21 @@ func TestHandleChmodUtimesWire(t *testing.T) {
 	}
 
 	// Chmod
-	mustWriteWS(t, conn, map[string]any{"event": "handle_chmod", "stream_id": handleID, "perm": 0o644})
+	mustWriteWS(t, conn, map[string]any{"event": "handle:chmod", "stream_id": handleID, "perm": 0o644})
 	chmodResp := mustReadWS(t, conn)
 	if ok, _ := chmodResp["ok"].(bool); !ok {
 		t.Fatalf("handle_chmod response ok = false: %v", chmodResp)
 	}
 
 	// Utimes
-	mustWriteWS(t, conn, map[string]any{"event": "handle_utimes", "stream_id": handleID, "atime": "2024-01-01T00:00:00Z", "mtime": "2024-06-15T12:30:00Z"})
+	mustWriteWS(t, conn, map[string]any{"event": "handle:utimes", "stream_id": handleID, "atime": "2024-01-01T00:00:00Z", "mtime": "2024-06-15T12:30:00Z"})
 	utimesResp := mustReadWS(t, conn)
 	if ok, _ := utimesResp["ok"].(bool); !ok {
 		t.Fatalf("handle_utimes response ok = false: %v", utimesResp)
 	}
 
 	// Close
-	mustWriteWS(t, conn, map[string]any{"event": "handle_close", "stream_id": handleID})
+	mustWriteWS(t, conn, map[string]any{"event": "handle:close", "stream_id": handleID})
 	closeResp := mustReadWS(t, conn)
 	if ok, _ := closeResp["ok"].(bool); !ok {
 		t.Fatalf("handle_close response ok = false: %v", closeResp)
@@ -259,14 +259,14 @@ func TestHandleInvalidStreamID(t *testing.T) {
 		event string
 		extra map[string]any
 	}{
-		{"read", "handle_read", map[string]any{"len": 0, "perm": 0}},
-		{"write", "handle_write", map[string]any{"len": 0}},
-		{"close", "handle_close", nil},
-		{"stat", "handle_stat", nil},
-		{"truncate", "handle_truncate", map[string]any{"len": 0}},
-		{"sync", "handle_sync", nil},
-		{"chmod", "handle_chmod", map[string]any{"perm": 0o644}},
-		{"utimes", "handle_utimes", map[string]any{"atime": "2024-01-01T00:00:00Z", "mtime": "2024-06-15T12:30:00Z"}},
+		{"read", "handle:read", map[string]any{"len": 0, "perm": 0}},
+		{"write", "handle:write", map[string]any{"len": 0}},
+		{"close", "handle:close", nil},
+		{"stat", "handle:stat", nil},
+		{"truncate", "handle:truncate", map[string]any{"len": 0}},
+		{"sync", "handle:sync", nil},
+		{"chmod", "handle:chmod", map[string]any{"perm": 0o644}},
+		{"utimes", "handle:utimes", map[string]any{"atime": "2024-01-01T00:00:00Z", "mtime": "2024-06-15T12:30:00Z"}},
 	}
 
 	for _, tc := range tests {
@@ -275,7 +275,7 @@ func TestHandleInvalidStreamID(t *testing.T) {
 			for k, v := range tc.extra {
 				msg[k] = v
 			}
-			if tc.event == "handle_write" {
+			if tc.event == "handle:write" {
 				mustWriteWSFrame(t, conn, msg, []byte("data"))
 			} else {
 				mustWriteWS(t, conn, msg)
@@ -298,7 +298,7 @@ func TestHandleReadWithOffsetAndLength(t *testing.T) {
 		t.Fatalf("WriteFile error = %v", err)
 	}
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open", "id": "open-offset", "path": "offset_test.txt", "flag": "r"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open", "id": "open-offset", "path": "offset_test.txt", "flag": "r"})
 	openResp := mustReadWS(t, conn)
 	handleID, _ := openResp["stream_id"].(string)
 	if handleID == "" {
@@ -309,7 +309,7 @@ func TestHandleReadWithOffsetAndLength(t *testing.T) {
 	}
 
 	// ReadAt(position=5, length=4) → expect "5678"
-	mustWriteWS(t, conn, map[string]any{"event": "handle_read", "stream_id": handleID, "len": 5, "perm": 4})
+	mustWriteWS(t, conn, map[string]any{"event": "handle:read", "stream_id": handleID, "len": 5, "perm": 4})
 	resp, payload := mustReadWSFrame(t, conn)
 	if resp["ok"] != true {
 		t.Fatalf("handle_read with offset failed: %v", resp)
@@ -329,7 +329,7 @@ func TestFilesystemStreamRejectsOutOfOrderChunks(t *testing.T) {
 
 	payload := []byte("test payload")
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open_write", "id": "open-write", "path": "ordered.bin"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open_write", "id": "open-write", "path": "ordered.bin"})
 	writeAck, _ := mustReadWSFrame(t, conn)
 	writeStreamID, _ := writeAck["stream_id"].(string)
 	if writeStreamID == "" {
@@ -337,7 +337,7 @@ func TestFilesystemStreamRejectsOutOfOrderChunks(t *testing.T) {
 	}
 
 	// Send seq=1 before seq=0 — should be rejected
-	mustWriteWSFrame(t, conn, map[string]any{"event": "stream_chunk", "stream_id": writeStreamID, "seq": 1}, payload)
+	mustWriteWSFrame(t, conn, map[string]any{"event": "stream:chunk", "stream_id": writeStreamID, "seq": 1}, payload)
 	resp := mustReadWS(t, conn)
 	if ok, _ := resp["ok"].(bool); ok {
 		t.Fatal("out-of-order chunk (seq=1 before seq=0) was accepted, want error")
@@ -347,7 +347,7 @@ func TestFilesystemStreamRejectsOutOfOrderChunks(t *testing.T) {
 	}
 
 	// Cleanup: close the stream
-	mustWriteWS(t, conn, map[string]any{"event": "stream_close", "id": "close", "stream_id": writeStreamID})
+	mustWriteWS(t, conn, map[string]any{"event": "stream:close", "id": "close", "stream_id": writeStreamID})
 }
 
 // ---------------------------------------------------------------------------
@@ -364,7 +364,7 @@ func TestFilesystemStreamChunkOnReadStreamRejected(t *testing.T) {
 	}
 
 	// Open for reading
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open_read", "id": "open-read", "path": "readonly.bin"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open_read", "id": "open-read", "path": "readonly.bin"})
 	readAck, _ := mustReadWSFrame(t, conn)
 	readStreamID, _ := readAck["stream_id"].(string)
 	if readStreamID == "" {
@@ -375,7 +375,7 @@ func TestFilesystemStreamChunkOnReadStreamRejected(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		header, _ := mustReadWSFrame(t, conn)
-		if header["event"] == "stream_close" {
+		if header["event"] == "stream:close" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -384,7 +384,7 @@ func TestFilesystemStreamChunkOnReadStreamRejected(t *testing.T) {
 	}
 
 	// Now try to write a chunk to the (now-closed) read stream
-	mustWriteWSFrame(t, conn, map[string]any{"event": "stream_chunk", "stream_id": readStreamID, "seq": 0}, []byte("bad"))
+	mustWriteWSFrame(t, conn, map[string]any{"event": "stream:chunk", "stream_id": readStreamID, "seq": 0}, []byte("bad"))
 	resp := mustReadWS(t, conn)
 	if ok, _ := resp["ok"].(bool); ok {
 		t.Fatal("stream_chunk on closed read stream was accepted, want error")
@@ -399,7 +399,7 @@ func TestFilesystemStreamDoubleClose(t *testing.T) {
 	root := t.TempDir()
 	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open_write", "id": "open", "path": "double_close.bin"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open_write", "id": "open", "path": "double_close.bin"})
 	ack, _ := mustReadWSFrame(t, conn)
 	streamID, _ := ack["stream_id"].(string)
 	if streamID == "" {
@@ -407,14 +407,14 @@ func TestFilesystemStreamDoubleClose(t *testing.T) {
 	}
 
 	// First close should succeed
-	mustWriteWS(t, conn, map[string]any{"event": "stream_close", "id": "close1", "stream_id": streamID})
+	mustWriteWS(t, conn, map[string]any{"event": "stream:close", "id": "close1", "stream_id": streamID})
 	resp := mustReadWS(t, conn)
 	if ok, _ := resp["ok"].(bool); !ok {
 		t.Fatalf("first stream_close failed: %v", resp)
 	}
 
 	// Second close on same ID should error
-	mustWriteWS(t, conn, map[string]any{"event": "stream_close", "id": "close2", "stream_id": streamID})
+	mustWriteWS(t, conn, map[string]any{"event": "stream:close", "id": "close2", "stream_id": streamID})
 	resp = mustReadWS(t, conn)
 	if ok, _ := resp["ok"].(bool); ok {
 		t.Fatal("second stream_close succeeded, want error")
@@ -434,7 +434,7 @@ func TestFilesystemStreamLargeFileRoundtrip(t *testing.T) {
 	payload := bytes.Repeat([]byte("ABCDEFGHIJ"), (payloadSize/10)+1)
 	payload = payload[:payloadSize]
 
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open_write", "id": "write", "path": "large.bin"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open_write", "id": "write", "path": "large.bin"})
 	ack, _ := mustReadWSFrame(t, conn)
 	writeStreamID, _ := ack["stream_id"].(string)
 	if writeStreamID == "" {
@@ -448,15 +448,15 @@ func TestFilesystemStreamLargeFileRoundtrip(t *testing.T) {
 		if end > len(payload) {
 			end = len(payload)
 		}
-		mustWriteWSFrame(t, conn, map[string]any{"event": "stream_chunk", "stream_id": writeStreamID, "seq": seq}, payload[offset:end])
+		mustWriteWSFrame(t, conn, map[string]any{"event": "stream:chunk", "stream_id": writeStreamID, "seq": seq}, payload[offset:end])
 		seq++
 	}
 
-	mustWriteWS(t, conn, map[string]any{"event": "stream_close", "id": "close", "stream_id": writeStreamID})
-	assertWSOK(t, mustReadWS(t, conn), "stream_close", "close")
+	mustWriteWS(t, conn, map[string]any{"event": "stream:close", "id": "close", "stream_id": writeStreamID})
+	assertWSOK(t, mustReadWS(t, conn), "stream:close", "close")
 
 	// Read back via stream
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open_read", "id": "read", "path": "large.bin"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open_read", "id": "read", "path": "large.bin"})
 	readAck, _ := mustReadWSFrame(t, conn)
 	readStreamID, _ := readAck["stream_id"].(string)
 	if readStreamID == "" {
@@ -471,9 +471,9 @@ func TestFilesystemStreamLargeFileRoundtrip(t *testing.T) {
 		}
 		header, chunk := mustReadWSFrame(t, conn)
 		switch header["event"] {
-		case "stream_chunk":
+		case "stream:chunk":
 			got.Write(chunk)
-		case "stream_close":
+		case "stream:close":
 			if !bytes.Equal(got.Bytes(), payload) {
 				t.Fatalf("large file mismatch: got %d bytes, want %d", got.Len(), len(payload))
 			}
@@ -493,7 +493,7 @@ func TestFilesystemStreamOpenWithFlags(t *testing.T) {
 	_, conn := newTestWebSocketRuntime(t, root, capabilityState{FS: true})
 
 	t.Run("open with flag 'r' on non-existent should fail", func(t *testing.T) {
-		mustWriteWS(t, conn, map[string]any{"event": "fs_open", "id": "open-r", "path": "nonexistent.txt", "flag": "r"})
+		mustWriteWS(t, conn, map[string]any{"event": "file:open", "id": "open-r", "path": "nonexistent.txt", "flag": "r"})
 		resp := mustReadWS(t, conn)
 		if ok, _ := resp["ok"].(bool); ok {
 			t.Fatal("fs_open 'r' on non-existent succeeded, want error")
@@ -501,7 +501,7 @@ func TestFilesystemStreamOpenWithFlags(t *testing.T) {
 	})
 
 	t.Run("open with flag 'w' should create file", func(t *testing.T) {
-		mustWriteWS(t, conn, map[string]any{"event": "fs_open", "id": "open-w", "path": "created.txt", "flag": "w"})
+		mustWriteWS(t, conn, map[string]any{"event": "file:open", "id": "open-w", "path": "created.txt", "flag": "w"})
 		resp := mustReadWS(t, conn)
 		if ok, _ := resp["ok"].(bool); !ok {
 			t.Fatalf("fs_open 'w' failed: %v", resp)
@@ -509,7 +509,7 @@ func TestFilesystemStreamOpenWithFlags(t *testing.T) {
 		// Close the handle
 		handleID, _ := resp["stream_id"].(string)
 		if handleID != "" {
-			mustWriteWS(t, conn, map[string]any{"event": "handle_close", "stream_id": handleID})
+			mustWriteWS(t, conn, map[string]any{"event": "handle:close", "stream_id": handleID})
 			mustReadWS(t, conn)
 		}
 	})
@@ -518,7 +518,7 @@ func TestFilesystemStreamOpenWithFlags(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, "append_test.txt"), []byte("base"), 0o644); err != nil {
 			t.Fatalf("WriteFile error = %v", err)
 		}
-		mustWriteWS(t, conn, map[string]any{"event": "fs_open", "id": "open-a", "path": "append_test.txt", "flag": "a"})
+		mustWriteWS(t, conn, map[string]any{"event": "file:open", "id": "open-a", "path": "append_test.txt", "flag": "a"})
 		resp := mustReadWS(t, conn)
 		if ok, _ := resp["ok"].(bool); !ok {
 			t.Fatalf("fs_open 'a' failed: %v", resp)
@@ -526,13 +526,13 @@ func TestFilesystemStreamOpenWithFlags(t *testing.T) {
 		handleID, _ := resp["stream_id"].(string)
 		if handleID != "" {
 			// Write to the handle at current position (append)
-			mustWriteWSFrame(t, conn, map[string]any{"event": "handle_write", "stream_id": handleID, "len": 0}, []byte("+appended"))
+			mustWriteWSFrame(t, conn, map[string]any{"event": "handle:write", "stream_id": handleID, "len": 0}, []byte("+appended"))
 			writeResp := mustReadWS(t, conn)
 			if ok, _ := writeResp["ok"].(bool); !ok {
 				t.Fatalf("handle_write to append handle failed: %v", writeResp)
 			}
 			// Close
-			mustWriteWS(t, conn, map[string]any{"event": "handle_close", "stream_id": handleID})
+			mustWriteWS(t, conn, map[string]any{"event": "handle:close", "stream_id": handleID})
 			mustReadWS(t, conn)
 		}
 		// Verify on disk
@@ -563,7 +563,7 @@ func TestHandleReadZeroLengthFile(t *testing.T) {
 	}
 
 	// Open the empty file for reading
-	mustWriteWS(t, conn, map[string]any{"event": "fs_open", "id": "open-empty", "path": "empty.txt", "flag": "r"})
+	mustWriteWS(t, conn, map[string]any{"event": "file:open", "id": "open-empty", "path": "empty.txt", "flag": "r"})
 	openResp := mustReadWS(t, conn)
 	handleID, _ := openResp["stream_id"].(string)
 	if handleID == "" {
@@ -571,7 +571,7 @@ func TestHandleReadZeroLengthFile(t *testing.T) {
 	}
 
 	// Read the zero-length file (uses ReadAll path: offset=0, requestedLength=0)
-	mustWriteWS(t, conn, map[string]any{"event": "handle_read", "stream_id": handleID, "len": 0, "perm": 0})
+	mustWriteWS(t, conn, map[string]any{"event": "handle:read", "stream_id": handleID, "len": 0, "perm": 0})
 	resp := mustReadWS(t, conn)
 	if ok, _ := resp["ok"].(bool); !ok {
 		t.Fatalf("handle_read on empty file failed: %v", resp)
@@ -582,7 +582,7 @@ func TestHandleReadZeroLengthFile(t *testing.T) {
 	}
 
 	// Clean up
-	mustWriteWS(t, conn, map[string]any{"event": "handle_close", "stream_id": handleID})
+	mustWriteWS(t, conn, map[string]any{"event": "handle:close", "stream_id": handleID})
 	mustReadWS(t, conn)
 }
 
@@ -630,8 +630,8 @@ func TestFilesystemUtimesNilDerefBug(t *testing.T) {
 
 	// Case 1: valid atime (RFC3339Nano), invalid mtime — triggers nil deref
 	t.Run("valid atime invalid mtime", func(t *testing.T) {
-		request := wsMessage{
-			Event: "fs_utimes",
+		request := WSMessage{
+			Event: "file:utimes",
 			ID:    json.RawMessage(`"u1"`),
 			Path:  "utimes_bug.txt",
 			Atime: "2024-01-01T00:00:00Z", // Valid RFC3339Nano
@@ -657,8 +657,8 @@ func TestFilesystemUtimesNilDerefBug(t *testing.T) {
 
 	// Case 2: invalid atime, valid mtime (RFC3339Nano) — same bug, reversed
 	t.Run("invalid atime valid mtime", func(t *testing.T) {
-		request := wsMessage{
-			Event: "fs_utimes",
+		request := WSMessage{
+			Event: "file:utimes",
 			ID:    json.RawMessage(`"u2"`),
 			Path:  "utimes_bug.txt",
 			Atime: "invalid",               // Invalid — atimeErr != nil

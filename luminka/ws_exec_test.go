@@ -15,8 +15,8 @@ import (
 
 func TestScriptStreamNilRuntime(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
-	req := wsMessage{Event: "script_stream", ID: rawStringData("s1"), Runner: "python", File: "test.py"}
+	conn := &WSConnection{conn: fconn}
+	req := WSMessage{Event: "script_stream", ID: rawStringData("s1"), Runner: "python", File: "test.py"}
 
 	err := (*Runtime)(nil).handleScriptStreamRequest(conn, req)
 	if err != nil {
@@ -26,8 +26,8 @@ func TestScriptStreamNilRuntime(t *testing.T) {
 	frame := <-fconn.writes
 	var resp map[string]any
 	_, _ = decodeFrame(frame.data, &resp)
-	if resp["event"] != "error" {
-		t.Fatalf("event = %v, want error", resp["event"])
+	if resp["event"] != "response:error" {
+		t.Fatalf("event = %v, want response:error", resp["event"])
 	}
 	if resp["error"] != "runtime is required" {
 		t.Fatalf("error = %v, want 'runtime is required'", resp["error"])
@@ -36,8 +36,8 @@ func TestScriptStreamNilRuntime(t *testing.T) {
 
 func TestShellStreamNilRuntime(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
-	req := wsMessage{Event: "shell_stream", ID: rawStringData("sh1"), Cmd: "ls"}
+	conn := &WSConnection{conn: fconn}
+	req := WSMessage{Event: "shell_stream", ID: rawStringData("sh1"), Cmd: "ls"}
 
 	err := (*Runtime)(nil).handleShellStreamRequest(conn, req)
 	if err != nil {
@@ -47,8 +47,8 @@ func TestShellStreamNilRuntime(t *testing.T) {
 	frame := <-fconn.writes
 	var resp map[string]any
 	_, _ = decodeFrame(frame.data, &resp)
-	if resp["event"] != "error" {
-		t.Fatalf("event = %v, want error", resp["event"])
+	if resp["event"] != "response:error" {
+		t.Fatalf("event = %v, want response:error", resp["event"])
 	}
 	if resp["error"] != "runtime is required" {
 		t.Fatalf("error = %v, want 'runtime is required'", resp["error"])
@@ -59,16 +59,16 @@ func TestShellStreamNilRuntime(t *testing.T) {
 
 func TestScriptStreamCapabilityDisabled(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 
 	rt := &Runtime{
 		Capabilities: capabilityState{Scripts: false},
 		ScriptBridge: NewScriptBridge("", time.Second),
-		connections:  make(map[*wsConnection]struct{}),
+		connections:  make(map[*WSConnection]struct{}),
 	}
 	rt.connections[conn] = struct{}{}
 
-	req := wsMessage{Event: "script_stream", ID: rawStringData("s2"), Runner: "python", File: "test.py"}
+	req := WSMessage{Event: "script_stream", ID: rawStringData("s2"), Runner: "python", File: "test.py"}
 
 	err := rt.handleScriptStreamRequest(conn, req)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestScriptStreamCapabilityDisabled(t *testing.T) {
 	frame := <-fconn.writes
 	var resp map[string]any
 	_, _ = decodeFrame(frame.data, &resp)
-	if resp["event"] != "script_response" {
+	if resp["event"] != "response:script:exec" {
 		t.Fatalf("event = %v, want script_response", resp["event"])
 	}
 	if ok, _ := resp["ok"].(bool); ok {
@@ -93,16 +93,16 @@ func TestScriptStreamCapabilityDisabled(t *testing.T) {
 
 func TestShellStreamCapabilityDisabled(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 
 	rt := &Runtime{
 		Capabilities: capabilityState{Shell: false},
 		ShellBridge:  NewShellBridge("", time.Second),
-		connections:  make(map[*wsConnection]struct{}),
+		connections:  make(map[*WSConnection]struct{}),
 	}
 	rt.connections[conn] = struct{}{}
 
-	req := wsMessage{Event: "shell_stream", ID: rawStringData("sh2"), Cmd: "ls"}
+	req := WSMessage{Event: "shell_stream", ID: rawStringData("sh2"), Cmd: "ls"}
 
 	err := rt.handleShellStreamRequest(conn, req)
 	if err != nil {
@@ -112,7 +112,7 @@ func TestShellStreamCapabilityDisabled(t *testing.T) {
 	frame := <-fconn.writes
 	var resp map[string]any
 	_, _ = decodeFrame(frame.data, &resp)
-	if resp["event"] != "shell_response" {
+	if resp["event"] != "response:shell:exec" {
 		t.Fatalf("event = %v, want shell_response", resp["event"])
 	}
 	if ok, _ := resp["ok"].(bool); ok {
@@ -127,16 +127,16 @@ func TestShellStreamCapabilityDisabled(t *testing.T) {
 
 func TestScriptStreamBridgeNil(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 
 	rt := &Runtime{
 		Capabilities: capabilityState{Scripts: true},
 		ScriptBridge: nil,
-		connections:  make(map[*wsConnection]struct{}),
+		connections:  make(map[*WSConnection]struct{}),
 	}
 	rt.connections[conn] = struct{}{}
 
-	req := wsMessage{Event: "script_stream", ID: rawStringData("s3"), Runner: "python", File: "test.py"}
+	req := WSMessage{Event: "script_stream", ID: rawStringData("s3"), Runner: "python", File: "test.py"}
 
 	err := rt.handleScriptStreamRequest(conn, req)
 	if err != nil {
@@ -146,7 +146,7 @@ func TestScriptStreamBridgeNil(t *testing.T) {
 	frame := <-fconn.writes
 	var resp map[string]any
 	_, _ = decodeFrame(frame.data, &resp)
-	if resp["event"] != "script_response" {
+	if resp["event"] != "response:script:exec" {
 		t.Fatalf("event = %v, want script_response", resp["event"])
 	}
 	if ok, _ := resp["ok"].(bool); ok {
@@ -161,16 +161,16 @@ func TestScriptStreamBridgeNil(t *testing.T) {
 
 func TestShellStreamBridgeNil(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 
 	rt := &Runtime{
 		Capabilities: capabilityState{Shell: true},
 		ShellBridge:  nil,
-		connections:  make(map[*wsConnection]struct{}),
+		connections:  make(map[*WSConnection]struct{}),
 	}
 	rt.connections[conn] = struct{}{}
 
-	req := wsMessage{Event: "shell_stream", ID: rawStringData("sh3"), Cmd: "ls"}
+	req := WSMessage{Event: "shell_stream", ID: rawStringData("sh3"), Cmd: "ls"}
 
 	err := rt.handleShellStreamRequest(conn, req)
 	if err != nil {
@@ -180,7 +180,7 @@ func TestShellStreamBridgeNil(t *testing.T) {
 	frame := <-fconn.writes
 	var resp map[string]any
 	_, _ = decodeFrame(frame.data, &resp)
-	if resp["event"] != "shell_response" {
+	if resp["event"] != "response:shell:exec" {
 		t.Fatalf("event = %v, want shell_response", resp["event"])
 	}
 	if ok, _ := resp["ok"].(bool); ok {
@@ -195,16 +195,16 @@ func TestShellStreamBridgeNil(t *testing.T) {
 
 func TestScriptStreamExecStreamError(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 
 	rt := &Runtime{
 		Capabilities: capabilityState{Scripts: true},
 		ScriptBridge: NewScriptBridge(t.TempDir(), time.Second),
-		connections:  make(map[*wsConnection]struct{}),
+		connections:  make(map[*WSConnection]struct{}),
 	}
 	rt.connections[conn] = struct{}{}
 
-	req := wsMessage{Event: "script_stream", ID: rawStringData("s4"), Runner: "python", File: "test.py"}
+	req := WSMessage{Event: "script_stream", ID: rawStringData("s4"), Runner: "python", File: "test.py"}
 
 	err := rt.handleScriptStreamRequest(conn, req)
 	if err != nil {
@@ -216,7 +216,7 @@ func TestScriptStreamExecStreamError(t *testing.T) {
 	frame := <-fconn.writes
 	var resp map[string]any
 	_, _ = decodeFrame(frame.data, &resp)
-	if resp["event"] != "script_response" {
+	if resp["event"] != "response:script:exec" {
 		t.Fatalf("event = %v, want script_response", resp["event"])
 	}
 	if ok, _ := resp["ok"].(bool); ok {
@@ -230,16 +230,16 @@ func TestScriptStreamExecStreamError(t *testing.T) {
 
 func TestShellStreamExecStreamError(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 
 	rt := &Runtime{
 		Capabilities: capabilityState{Shell: true},
 		ShellBridge:  NewShellBridge(t.TempDir(), time.Second),
-		connections:  make(map[*wsConnection]struct{}),
+		connections:  make(map[*WSConnection]struct{}),
 	}
 	rt.connections[conn] = struct{}{}
 
-	req := wsMessage{Event: "shell_stream", ID: rawStringData("sh4"), Cmd: "ls"}
+	req := WSMessage{Event: "shell_stream", ID: rawStringData("sh4"), Cmd: "ls"}
 
 	err := rt.handleShellStreamRequest(conn, req)
 	if err != nil {
@@ -249,7 +249,7 @@ func TestShellStreamExecStreamError(t *testing.T) {
 	frame := <-fconn.writes
 	var resp map[string]any
 	_, _ = decodeFrame(frame.data, &resp)
-	if resp["event"] != "shell_response" {
+	if resp["event"] != "response:shell:exec" {
 		t.Fatalf("event = %v, want shell_response", resp["event"])
 	}
 	if ok, _ := resp["ok"].(bool); ok {
@@ -272,7 +272,7 @@ func TestScriptStreamNilConn(t *testing.T) {
 		Capabilities: capabilityState{Scripts: true},
 		ScriptBridge: NewScriptBridge("", time.Second),
 	}
-	req := wsMessage{Event: "script_stream", ID: rawStringData("s5"), Runner: "python", File: "test.py"}
+	req := WSMessage{Event: "script_stream", ID: rawStringData("s5"), Runner: "python", File: "test.py"}
 
 	err := rt.handleScriptStreamRequest(nil, req)
 	if err == nil {
@@ -286,22 +286,22 @@ func TestScriptStreamNilConn(t *testing.T) {
 
 func TestScriptStreamLogEventOnError(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 
 	// Capabilities disabled → handler logs nothing (returns early before log)
 	rt := &Runtime{
 		Capabilities: capabilityState{Scripts: false},
-		connections:  make(map[*wsConnection]struct{}),
+		connections:  make(map[*WSConnection]struct{}),
 	}
 	rt.connections[conn] = struct{}{}
 
-	req := wsMessage{Event: "script_stream", ID: rawStringData("s6"), Runner: "python", File: "test.py"}
+	req := WSMessage{Event: "script_stream", ID: rawStringData("s6"), Runner: "python", File: "test.py"}
 
 	_ = rt.handleScriptStreamRequest(conn, req)
 	frame := <-fconn.writes
 	var resp map[string]any
 	_, _ = decodeFrame(frame.data, &resp)
-	if resp["event"] != "script_response" {
+	if resp["event"] != "response:script:exec" {
 		t.Fatalf("event = %v, want script_response", resp["event"])
 	}
 	// Error path — the handler did not log anything because it returned early
@@ -312,16 +312,16 @@ func TestScriptStreamLogEventOnError(t *testing.T) {
 
 func TestScriptStreamWithTimeout(t *testing.T) {
 	fconn := newFakeWebSocketConn()
-	conn := &wsConnection{conn: fconn}
+	conn := &WSConnection{conn: fconn}
 
 	rt := &Runtime{
 		Capabilities: capabilityState{Scripts: true},
 		ScriptBridge: NewScriptBridge(t.TempDir(), time.Second),
-		connections:  make(map[*wsConnection]struct{}),
+		connections:  make(map[*WSConnection]struct{}),
 	}
 	rt.connections[conn] = struct{}{}
 
-	req := wsMessage{
+	req := WSMessage{
 		Event:   "script_stream",
 		ID:      rawStringData("s7"),
 		Runner:  "python",
@@ -338,7 +338,7 @@ func TestScriptStreamWithTimeout(t *testing.T) {
 	frame := <-fconn.writes
 	var resp map[string]any
 	_, _ = decodeFrame(frame.data, &resp)
-	if resp["event"] != "script_response" {
+	if resp["event"] != "response:script:exec" {
 		t.Fatalf("event = %v, want script_response", resp["event"])
 	}
 }

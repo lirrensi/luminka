@@ -83,9 +83,9 @@ test.beforeEach(() => {
 });
 
 test("LuminkaClient frame helpers round trip", () => {
-  const frame = encodeLuminkaFrame({ event: "fs_changed", path: "notes.txt" }, new Uint8Array([1, 2, 3]));
+  const frame = encodeLuminkaFrame({ event: "file:changed", path: "notes.txt" }, new Uint8Array([1, 2, 3]));
   const decoded = decodeLuminkaFrame(frame);
-  assert.deepEqual(decoded.header, { event: "fs_changed", path: "notes.txt" });
+  assert.deepEqual(decoded.header, { event: "file:changed", path: "notes.txt" });
   assert.deepEqual(Array.from(decoded.payload), [1, 2, 3]);
 });
 
@@ -98,11 +98,11 @@ test("LuminkaClient appInfo sends a binary request and parses response", async (
   socket.open();
   await flushAsyncWork();
   const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
-  assert.equal(request.header.event, "app_info");
-  assert.equal(request.header.id, "luminka-1");
+	assert.equal(request.header.event, "app:info");
+	assert.equal(request.header.id, "luminka-1");
 
-  socket.message({
-    event: "app_info",
+	socket.message({
+		event: "response:app:info",
     id: request.header.id,
     ok: true,
     name: "starter",
@@ -135,18 +135,18 @@ test("LuminkaClient read/write aliases call text helpers", async () => {
   socket.open();
   await flushAsyncWork();
   const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
-  assert.equal(request.header.event, "fs_read_text");
+  assert.equal(request.header.event, "file:read_text");
   assert.equal(request.header.path, "secret.txt");
 
-  socket.message({ event: "fs_read_text", id: request.header.id, ok: true, data: "hello" });
+  socket.message({ event: "file:read_text", id: request.header.id, ok: true, data: "hello" });
   assert.equal(await readAlias, "hello");
 
   const writePromise = client.write("secret.txt", "updated");
   await flushAsyncWork();
   const writeRequest = decodeLuminkaFrame(socket.sent[1] ?? new Uint8Array());
-  assert.equal(writeRequest.header.event, "fs_write_text");
+  assert.equal(writeRequest.header.event, "file:write_text");
   assert.equal(writeRequest.header.data, "updated");
-  socket.message({ event: "fs_write_text", id: writeRequest.header.id, ok: true });
+  socket.message({ event: "file:write_text", id: writeRequest.header.id, ok: true });
   await writePromise;
 });
 
@@ -160,15 +160,15 @@ test("LuminkaClient trackedTextFile loads and saves text", async () => {
   socket.open();
   await flushAsyncWork();
   const watchRequest = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
-  assert.equal(watchRequest.header.event, "fs_watch");
+  assert.equal(watchRequest.header.event, "file:watch");
   assert.equal(watchRequest.header.path, "workspace.emptyspace.xml");
-  socket.message({ event: "fs_watch", id: watchRequest.header.id, ok: true });
+  socket.message({ event: "file:watch", id: watchRequest.header.id, ok: true });
 
   await flushAsyncWork();
   const readRequest = decodeLuminkaFrame(socket.sent[1] ?? new Uint8Array());
-  assert.equal(readRequest.header.event, "fs_read_text");
+  assert.equal(readRequest.header.event, "file:read_text");
   assert.equal(readRequest.header.path, "workspace.emptyspace.xml");
-  socket.message({ event: "fs_read_text", id: readRequest.header.id, ok: true, data: "<workspace />" });
+  socket.message({ event: "file:read_text", id: readRequest.header.id, ok: true, data: "<workspace />" });
 
   assert.equal(await loadPromise, "<workspace />");
   assert.equal(file.getText(), "<workspace />");
@@ -176,10 +176,10 @@ test("LuminkaClient trackedTextFile loads and saves text", async () => {
   const savePromise = file.save("<workspace name=\"Updated\" />");
   await flushAsyncWork();
   const writeRequest = decodeLuminkaFrame(socket.sent[2] ?? new Uint8Array());
-  assert.equal(writeRequest.header.event, "fs_write_text");
+  assert.equal(writeRequest.header.event, "file:write_text");
   assert.equal(writeRequest.header.path, "workspace.emptyspace.xml");
   assert.equal(writeRequest.header.data, "<workspace name=\"Updated\" />");
-  socket.message({ event: "fs_write_text", id: writeRequest.header.id, ok: true });
+  socket.message({ event: "file:write_text", id: writeRequest.header.id, ok: true });
 
   await savePromise;
   assert.equal(file.getText(), "<workspace name=\"Updated\" />");
@@ -195,23 +195,23 @@ test("LuminkaClient trackedTextFile emits debounced external text changes", asyn
   socket.open();
   await flushAsyncWork();
   const watchRequest = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
-  socket.message({ event: "fs_watch", id: watchRequest.header.id, ok: true });
+  socket.message({ event: "file:watch", id: watchRequest.header.id, ok: true });
   await flushAsyncWork();
   const initialReadRequest = decodeLuminkaFrame(socket.sent[1] ?? new Uint8Array());
-  socket.message({ event: "fs_read_text", id: initialReadRequest.header.id, ok: true, data: "before" });
+  socket.message({ event: "file:read_text", id: initialReadRequest.header.id, ok: true, data: "before" });
   assert.equal(await loadPromise, "before");
 
   const changes: string[] = [];
   file.onExternalChange((text) => {
     changes.push(text);
   });
-  socket.message({ event: "fs_changed", path: "workspace.emptyspace.xml" });
+  socket.message({ event: "file:changed", path: "workspace.emptyspace.xml" });
   await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
 
   const externalReadRequest = decodeLuminkaFrame(socket.sent[2] ?? new Uint8Array());
-  assert.equal(externalReadRequest.header.event, "fs_read_text");
+  assert.equal(externalReadRequest.header.event, "file:read_text");
   assert.equal(externalReadRequest.header.path, "workspace.emptyspace.xml");
-  socket.message({ event: "fs_read_text", id: externalReadRequest.header.id, ok: true, data: "after" });
+  socket.message({ event: "file:read_text", id: externalReadRequest.header.id, ok: true, data: "after" });
 
   await flushAsyncWork();
   assert.deepEqual(changes, ["after"]);
@@ -228,10 +228,10 @@ test("LuminkaClient trackedTextFile suppresses self write echoes", async () => {
   socket.open();
   await flushAsyncWork();
   const watchRequest = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
-  socket.message({ event: "fs_watch", id: watchRequest.header.id, ok: true });
+  socket.message({ event: "file:watch", id: watchRequest.header.id, ok: true });
   await flushAsyncWork();
   const initialReadRequest = decodeLuminkaFrame(socket.sent[1] ?? new Uint8Array());
-  socket.message({ event: "fs_read_text", id: initialReadRequest.header.id, ok: true, data: "before" });
+  socket.message({ event: "file:read_text", id: initialReadRequest.header.id, ok: true, data: "before" });
   assert.equal(await loadPromise, "before");
 
   const changes: string[] = [];
@@ -241,19 +241,19 @@ test("LuminkaClient trackedTextFile suppresses self write echoes", async () => {
   const savePromise = file.save("after");
   await flushAsyncWork();
   const writeRequest = decodeLuminkaFrame(socket.sent[2] ?? new Uint8Array());
-  assert.equal(writeRequest.header.event, "fs_write_text");
+  assert.equal(writeRequest.header.event, "file:write_text");
   assert.equal(writeRequest.header.path, "workspace.emptyspace.xml");
   assert.equal(writeRequest.header.data, "after");
-  socket.message({ event: "fs_write_text", id: writeRequest.header.id, ok: true });
+  socket.message({ event: "file:write_text", id: writeRequest.header.id, ok: true });
   await savePromise;
 
-  socket.message({ event: "fs_changed", path: "workspace.emptyspace.xml" });
+  socket.message({ event: "file:changed", path: "workspace.emptyspace.xml" });
   await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
 
   const echoReadRequest = decodeLuminkaFrame(socket.sent[3] ?? new Uint8Array());
-  assert.equal(echoReadRequest.header.event, "fs_read_text");
+  assert.equal(echoReadRequest.header.event, "file:read_text");
   assert.equal(echoReadRequest.header.path, "workspace.emptyspace.xml");
-  socket.message({ event: "fs_read_text", id: echoReadRequest.header.id, ok: true, data: "after" });
+  socket.message({ event: "file:read_text", id: echoReadRequest.header.id, ok: true, data: "after" });
 
   await flushAsyncWork();
   assert.deepEqual(changes, []);
@@ -271,31 +271,31 @@ test("LuminkaClient trackedTextFile serializes concurrent watch startup", async 
   await flushAsyncWork();
   const watchRequestsBeforeResponse = socket.sent
     .map((frame) => decodeLuminkaFrame(frame).header)
-    .filter((header) => header.event === "fs_watch");
+    .filter((header) => header.event === "file:watch");
   assert.equal(watchRequestsBeforeResponse.length, 1);
 
   const watchRequest = watchRequestsBeforeResponse[0];
-  socket.message({ event: "fs_watch", id: watchRequest.id, ok: true });
+  socket.message({ event: "file:watch", id: watchRequest.id, ok: true });
   await flushAsyncWork();
 
   const pendingRequests = socket.sent
     .map((frame) => decodeLuminkaFrame(frame).header)
-    .filter((header) => header.event === "fs_read_text" || header.event === "fs_write_text");
+    .filter((header) => header.event === "file:read_text" || header.event === "file:write_text");
   assert.equal(pendingRequests.length, 2);
   for (const request of pendingRequests) {
     assert.equal(request.path, "workspace.emptyspace.xml");
-    if (request.event === "fs_read_text") {
-      socket.message({ event: "fs_read_text", id: request.id, ok: true, data: "before" });
+    if (request.event === "file:read_text") {
+      socket.message({ event: "file:read_text", id: request.id, ok: true, data: "before" });
     } else {
       assert.equal(request.data, "after");
-      socket.message({ event: "fs_write_text", id: request.id, ok: true });
+      socket.message({ event: "file:write_text", id: request.id, ok: true });
     }
   }
 
   await operations;
   const allWatchRequests = socket.sent
     .map((frame) => decodeLuminkaFrame(frame).header)
-    .filter((header) => header.event === "fs_watch");
+    .filter((header) => header.event === "file:watch");
   assert.equal(allWatchRequests.length, 1);
 });
 
@@ -308,10 +308,10 @@ test("LuminkaClient assembles byte streams from chunks", async () => {
   socket.open();
   await flushAsyncWork();
   const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
-  socket.message({ event: "fs_open_read", id: request.header.id, ok: true, stream_id: "stream-1" });
-  socket.message({ event: "stream_chunk", stream_id: "stream-1", seq: 0, eof: false }, new Uint8Array([1, 2]));
-  socket.message({ event: "stream_chunk", stream_id: "stream-1", seq: 1, eof: false }, new Uint8Array([3, 4]));
-  socket.message({ event: "stream_close", stream_id: "stream-1", ok: true });
+  socket.message({ event: "file:open_read", id: request.header.id, ok: true, stream_id: "stream-1" });
+  socket.message({ event: "stream:chunk", stream_id: "stream-1", seq: 0, eof: false }, new Uint8Array([1, 2]));
+  socket.message({ event: "stream:chunk", stream_id: "stream-1", seq: 1, eof: false }, new Uint8Array([3, 4]));
+  socket.message({ event: "stream:close", stream_id: "stream-1", ok: true });
 
   assert.deepEqual(Array.from(await bytesPromise), [1, 2, 3, 4]);
 });
@@ -343,7 +343,7 @@ test("LuminkaClient ignores malformed websocket messages until a valid response 
   const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
 
   socket.rawMessage("not a frame");
-  socket.message({ event: "fs_exists", id: request.header.id, ok: true, exists: true });
+  socket.message({ event: "file:exists", id: request.header.id, ok: true, exists: true });
 
   await assert.doesNotReject(existsPromise);
   assert.equal(await existsPromise, true);
@@ -387,10 +387,10 @@ test("LuminkaClient emits binary frames for script and shell streams", async () 
   await flushAsyncWork();
   const script = await scriptPromise;
   const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
-  assert.equal(request.header.event, "script_exec_stream");
+  assert.equal(request.header.event, "script:stream");
 
-  socket.message({ event: "stream_chunk", stream_id: "stream-2", lane: "stdout", seq: 0, eof: false }, new Uint8Array([111, 107]));
-  socket.message({ event: "script_response", id: request.header.id, ok: true, stream_id: "stream-2", code: 0 });
+  socket.message({ event: "stream:chunk", stream_id: "stream-2", lane: "stdout", seq: 0, eof: false }, new Uint8Array([111, 107]));
+  socket.message({ event: "response:script:exec", id: request.header.id, ok: true, stream_id: "stream-2", code: 0 });
 
   const chunk = await collectStreamText(script.stdout);
   assert.equal(chunk, "ok");
@@ -407,10 +407,10 @@ test("LuminkaClient broadcast sends a JSON broadcast frame", async () => {
   socket.open();
   await flushAsyncWork();
   const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
-  assert.equal(request.header.event, "broadcast");
+  assert.equal(request.header.event, "ws:broadcast");
   assert.equal(request.header.channel, "workspace");
   assert.deepEqual(request.header.data, { type: "ping" });
-  socket.message({ event: "broadcast_response", id: request.header.id, ok: true });
+  socket.message({ event: "response:ws:broadcast", id: request.header.id, ok: true });
   await pending;
 });
 
@@ -421,8 +421,8 @@ test("LuminkaClient onBroadcast receives pushed frames for matching channel only
   const messages: unknown[] = [];
   client.onBroadcast("workspace", (message) => messages.push(message.data));
 
-  socket.message({ event: "broadcast", channel: "other", data: { type: "skip" } });
-  socket.message({ event: "broadcast", channel: "workspace", data: { type: "ping" } }, new Uint8Array([7]));
+  socket.message({ event: "ws:broadcast", channel: "other", data: { type: "skip" } });
+  socket.message({ event: "ws:broadcast", channel: "workspace", data: { type: "ping" } }, new Uint8Array([7]));
   await flushAsyncWork();
 
   assert.deepEqual(messages, [{ type: "ping" }]);
@@ -468,6 +468,164 @@ test("LuminkaClient multi-tab coordinators elect the older session as primary", 
   await stopSecond;
 });
 
+// ---------------------------------------------------------------------------
+// Extension API: call() and onEvent()
+// ---------------------------------------------------------------------------
+
+test("LuminkaClient call() sends custom event and returns response", async () => {
+  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
+  const callPromise = client.call("custom:event", { foo: "bar" });
+  const socket = FakeWebSocket.instances[0];
+  assert.ok(socket);
+
+  socket.open();
+  await flushAsyncWork();
+  const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
+  assert.equal(request.header.event, "custom:event");
+  assert.equal((request.header as Record<string, unknown>).foo, "bar");
+  assert.equal(request.header.id, "luminka-1");
+
+  socket.message({ event: "response:custom:event", id: request.header.id, ok: true, data: "ok" });
+  const resp = await callPromise;
+  assert.equal(resp.event, "response:custom:event");
+  assert.equal(resp.data, "ok");
+});
+
+test("LuminkaClient call() with binary payload", async () => {
+  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
+  const payload = new Uint8Array([1, 2, 3]);
+  const callPromise = client.call("custom:binary", {}, payload);
+  const socket = FakeWebSocket.instances[0];
+  assert.ok(socket);
+
+  socket.open();
+  await flushAsyncWork();
+  const frame = socket.sent[0] ?? new Uint8Array();
+  const { header, payload: decodedPayload } = decodeLuminkaFrame(frame);
+  assert.equal(header.event, "custom:binary");
+  assert.deepEqual(Array.from(decodedPayload), [1, 2, 3]);
+
+  socket.message({ event: "response:custom:binary", id: header.id, ok: true });
+  await callPromise;
+});
+
+test("LuminkaClient call() without data sends event only", async () => {
+  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
+  const callPromise = client.call("simple:ping");
+  const socket = FakeWebSocket.instances[0];
+  assert.ok(socket);
+
+  socket.open();
+  await flushAsyncWork();
+  const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
+  assert.equal(request.header.event, "simple:ping");
+  assert.equal(request.header.id, "luminka-1");
+
+  socket.message({ event: "response:simple:ping", id: request.header.id, ok: true });
+  await callPromise;
+});
+
+test("LuminkaClient onEvent() receives pushed custom events", async () => {
+  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
+  const received: Array<{ msg: LuminkaFrame; payload: Uint8Array }> = [];
+  client.onEvent("goal:changed", (msg, payload) => {
+    received.push({ msg, payload });
+  });
+
+  await openClient(client);
+  const socket = FakeWebSocket.instances[0];
+
+  socket.message({ event: "goal:changed", data: { goal: "ship" } }, new Uint8Array([10]));
+
+  await flushAsyncWork();
+  assert.equal(received.length, 1);
+  assert.deepEqual(received[0].msg.data, { goal: "ship" });
+  assert.deepEqual(Array.from(received[0].payload), [10]);
+});
+
+test("LuminkaClient onEvent() unsubscribe stops receiving", async () => {
+  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
+  const received: string[] = [];
+  const unsub = client.onEvent("custom:push", (msg) => {
+    received.push(msg.event);
+  });
+
+  await openClient(client);
+  const socket = FakeWebSocket.instances[0];
+
+  socket.message({ event: "custom:push" });
+  await flushAsyncWork();
+  assert.equal(received.length, 1);
+
+  unsub();
+  socket.message({ event: "custom:push" });
+  await flushAsyncWork();
+  assert.equal(received.length, 1); // Still 1 — second message was ignored
+});
+
+test("LuminkaClient onEvent() multiple listeners on same event", async () => {
+  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
+  const results: string[] = [];
+  const unsub1 = client.onEvent("multi:event", (msg) => { results.push("a"); });
+  const unsub2 = client.onEvent("multi:event", (msg) => { results.push("b"); });
+
+  await openClient(client);
+  const socket = FakeWebSocket.instances[0];
+
+  socket.message({ event: "multi:event" });
+  await flushAsyncWork();
+  assert.equal(results.length, 2);
+  assert.ok(results.includes("a"));
+  assert.ok(results.includes("b"));
+});
+
+test("LuminkaClient onEvent() does not intercept pending request resolution", async () => {
+  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
+  const received: string[] = [];
+  client.onEvent("custom:event", (msg) => {
+    received.push("listener");
+  });
+
+  const respPromise = client.call("custom:event", {});
+  const socket = FakeWebSocket.instances[0];
+  socket.open();
+  await flushAsyncWork();
+
+  const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
+  // A response with matching ID — this should resolve the pending request,
+  // NOT invoke the onEvent listener.
+  socket.message({ event: "response:custom:event", id: request.header.id, ok: true, data: "done" });
+
+  const resp = await respPromise;
+  assert.deepEqual(resp, { event: "response:custom:event", id: request.header.id, ok: true, data: "done" });
+  assert.equal(received.length, 0); // Listener should NOT fire for response with ID
+});
+
+test("LuminkaClient onEvent() fires for push without ID even when pending exists", async () => {
+  const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
+  const received: string[] = [];
+  client.onEvent("goal:changed", (msg) => {
+    received.push(msg.event);
+  });
+
+  // Have a pending request too
+  const respPromise = client.call("other:event");
+  const socket = FakeWebSocket.instances[0];
+  socket.open();
+  await flushAsyncWork();
+
+  // Push event (no id) should still reach the listener
+  socket.message({ event: "goal:changed", data: "push" });
+  await flushAsyncWork();
+  assert.equal(received.length, 1);
+  assert.equal(received[0], "goal:changed");
+
+  // Resolve the pending request
+  const request = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array());
+  socket.message({ event: "response:other:event", id: request.header.id, ok: true });
+  await respPromise;
+});
+
 test("LuminkaClient multi-tab coordinator removes peers on bye", async () => {
   const client = new LuminkaClient({ url: "ws://127.0.0.1:7777/ws" });
   const coordinator = client.createMultiTabCoordinator("main", { sessionId: "local", heartbeatMs: 10, staleMs: 50 });
@@ -478,11 +636,11 @@ test("LuminkaClient multi-tab coordinator removes peers on bye", async () => {
   acknowledgeLastBroadcast(socket);
   await start;
 
-  socket.message({ event: "broadcast", channel: "luminka:multi-tab:main", data: { kind: "hello", sessionId: "peer", startedAt: 1 } });
+  socket.message({ event: "ws:broadcast", channel: "luminka:multi-tab:main", data: { kind: "hello", sessionId: "peer", startedAt: 1 } });
   await flushAsyncWork();
   assert.equal(coordinator.getPrimary()?.sessionId, "peer");
 
-  socket.message({ event: "broadcast", channel: "luminka:multi-tab:main", data: { kind: "bye", sessionId: "peer", startedAt: 1 } });
+  socket.message({ event: "ws:broadcast", channel: "luminka:multi-tab:main", data: { kind: "bye", sessionId: "peer", startedAt: 1 } });
   await flushAsyncWork();
   assert.equal(coordinator.getPrimary()?.sessionId, "local");
   assert.equal(coordinator.getPeers().some((peer) => peer.sessionId === "peer"), false);
@@ -511,11 +669,11 @@ test("FileHandle open/read/close round-trip", async () => {
   socket.open();
   await flushAsyncWork();
   const openRequest = decodeLuminkaFrame(socket.sent[0] ?? new Uint8Array()).header;
-  assert.equal(openRequest.event, "fs_open");
+  assert.equal(openRequest.event, "file:open");
   assert.equal(openRequest.path, "data.bin");
   assert.equal(openRequest.flag, "r");
 
-  socket.message({ event: "fs_response", id: openRequest.id, ok: true, stream_id: "handle-1" });
+  socket.message({ event: "response:file:open", id: openRequest.id, ok: true, stream_id: "handle-1" });
   const handle = await openPromise;
   assert.ok(handle, "expected FileHandle");
 
@@ -523,10 +681,10 @@ test("FileHandle open/read/close round-trip", async () => {
   const readPromise = handle.read();
   await flushAsyncWork();
   const readRequest = decodeLuminkaFrame(socket.sent[1] ?? new Uint8Array()).header;
-  assert.equal(readRequest.event, "handle_read");
+  assert.equal(readRequest.event, "handle:read");
   assert.equal(readRequest.stream_id, "handle-1");
 
-  socket.message({ event: "fs_response", id: readRequest.id, ok: true, stream_id: "handle-1" }, content);
+  socket.message({ event: "response:handle:read", id: readRequest.id, ok: true, stream_id: "handle-1" }, content);
   const data = await readPromise;
   assert.deepEqual(Array.from(data), [72, 101, 108, 108, 111]);
 
@@ -534,10 +692,10 @@ test("FileHandle open/read/close round-trip", async () => {
   const closePromise = handle.close();
   await flushAsyncWork();
   const closeRequest = decodeLuminkaFrame(socket.sent[2] ?? new Uint8Array()).header;
-  assert.equal(closeRequest.event, "handle_close");
+  assert.equal(closeRequest.event, "handle:close");
   assert.equal(closeRequest.stream_id, "handle-1");
 
-  socket.message({ event: "fs_response", id: closeRequest.id, ok: true });
+  socket.message({ event: "response:handle:close", id: closeRequest.id, ok: true });
   await closePromise;
 });
 
@@ -551,14 +709,14 @@ async function openClient(client: LuminkaClient): Promise<void> {
 
 function acknowledgeLastBroadcast(socket: FakeWebSocket): void {
   const request = decodeLuminkaFrame(socket.sent.at(-1) ?? new Uint8Array()).header;
-  assert.equal(request.event, "broadcast");
-  socket.message({ event: "broadcast_response", id: request.id, ok: true });
+  assert.equal(request.event, "ws:broadcast");
+  socket.message({ event: "response:ws:broadcast", id: request.id, ok: true });
 }
 
 function deliverLastBroadcast(from: FakeWebSocket, to: FakeWebSocket): void {
   const frame = decodeLuminkaFrame(from.sent.at(-1) ?? new Uint8Array());
-  assert.equal(frame.header.event, "broadcast");
-  to.message({ event: "broadcast", channel: frame.header.channel, data: frame.header.data, content_type: frame.header.content_type }, frame.payload);
+  assert.equal(frame.header.event, "ws:broadcast");
+  to.message({ event: "ws:broadcast", channel: frame.header.channel, data: frame.header.data, content_type: frame.header.content_type }, frame.payload);
 }
 
 async function collectStreamText(stream: ReadableStream<Uint8Array>): Promise<string> {
