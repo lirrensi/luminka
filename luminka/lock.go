@@ -114,6 +114,7 @@ type instanceRecord struct {
 	Port   int                  `json:"port"`
 	Mode   Mode                 `json:"mode,omitempty"`
 	Window instanceWindowRecord `json:"window,omitempty"`
+	Nonce  string               `json:"nonce,omitempty"`
 }
 
 type instanceWindowRecord struct {

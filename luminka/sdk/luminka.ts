@@ -34,6 +34,7 @@ export interface LuminkaAppInfo {
 export interface LuminkaOptions {
   url?: string;
   requestTimeout?: number; // milliseconds (default 30000)
+  autoReconnect?: boolean; // reconnect on unexpected disconnect (default true)
 }
 
 export interface LuminkaFrame {
@@ -258,6 +259,11 @@ export class LuminkaClient {
   private readonly pendingExecStreams = new Map<string, ExecStreamState>();
   private readonly fileListeners = new Set<(path: string) => void>();
   private readonly broadcastListeners = new Map<string, Set<BroadcastListener>>();
+  private intentionalDisconnect = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  private readonly watchedPaths = new Set<string>();
+  private readonly reconnectListeners = new Set<() => void | Promise<void>>();
 
   constructor(private readonly options: LuminkaOptions = {}) {}
 
@@ -292,7 +298,7 @@ export class LuminkaClient {
       const handleOpen = () => {
         cleanup();
         this.connectPromise = null;
-        resolve();
+        this.authenticate().then(resolve).catch(reject);
       };
 
       const handleError = () => {
@@ -317,22 +323,118 @@ export class LuminkaClient {
     socket.addEventListener("message", (event) => this.handleMessage(event));
     socket.addEventListener("close", () => {
       if (this.socket === socket) {
-        // This close event is for the current socket
         this.socket = null;
         this.failAll(new Error("Luminka connection closed"));
+        if (!this.intentionalDisconnect) {
+          this.scheduleReconnect();
+        }
       }
-      // Stale close event from a previous socket — ignore entirely
     });
     return this.connectPromise;
   }
 
   disconnect(): void {
+    this.intentionalDisconnect = true;
+    this.stopReconnect();
     const socket = this.socket;
     this.socket = null;
     this.connectPromise = null;
     this.failAll(new Error("Luminka connection closed"));
     if (socket && socket.readyState < WebSocket.CLOSING) {
       socket.close();
+    }
+  }
+
+  private async authenticate(): Promise<void> {
+    const nonce = this.nonceFromURL();
+    if (!nonce) {
+      return;
+    }
+
+    const socket = this.requireSocket();
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      throw new Error("Luminka socket is not open for authentication");
+    }
+
+    const id = this.nextId();
+    const frame = encodeLuminkaFrame({ event: "ws_auth", data: nonce, id });
+    socket.send(frame);
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = this.options.requestTimeout ?? 30000;
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error("ws_auth timed out"));
+      }, timeout);
+      this.pending.set(id, {
+        resolve: (header) => {
+          clearTimeout(timer);
+          if (header.ok) {
+            resolve();
+          } else {
+            reject(new Error(header.error || "authentication failed"));
+          }
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+    });
+  }
+
+  private nonceFromURL(): string | null {
+    try {
+      const params = new URLSearchParams(
+        (globalThis as typeof globalThis & { location?: { search?: string } }).location?.search ?? "",
+      );
+      return params.get("t");
+    } catch {
+      return null;
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.intentionalDisconnect) return;
+    if (this.options.autoReconnect === false) return;
+    const backoff = [100, 200, 400, 800, 1600, 3200, 5000, 10000, 30000];
+    const delay = backoff[Math.min(this.reconnectAttempt, backoff.length - 1)];
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.intentionalDisconnect) return;
+      if (this.socket && this.socket.readyState === WebSocket.OPEN) return;
+      this.reconnectAttempt++;
+      this.connect()
+        .then(() => this.onReconnectSuccess())
+        .catch(() => {
+          this.scheduleReconnect();
+        });
+    }, delay);
+  }
+
+  private stopReconnect(): void {
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private async onReconnectSuccess(): Promise<void> {
+    this.reconnectAttempt = 0;
+    const paths = [...this.watchedPaths];
+    for (const path of paths) {
+      try {
+        await this.request({ event: "fs_watch", path });
+      } catch {
+        // Best-effort: some watches may fail, continue with others
+      }
+    }
+    for (const listener of this.reconnectListeners) {
+      try {
+        await listener();
+      } catch {
+        // Best-effort
+      }
     }
   }
 
@@ -582,10 +684,12 @@ export class LuminkaClient {
 
   async watch(path: string): Promise<void> {
     await this.request({ event: "fs_watch", path });
+    this.watchedPaths.add(path);
   }
 
   async unwatch(path: string): Promise<void> {
     await this.request({ event: "fs_unwatch", path });
+    this.watchedPaths.delete(path);
   }
 
   trackedTextFile(path: string, options: TrackedTextFileOptions = {}): TrackedTextFile {
@@ -649,6 +753,17 @@ export class LuminkaClient {
   onFileChanged(listener: (path: string) => void): () => void {
     this.fileListeners.add(listener);
     return () => this.fileListeners.delete(listener);
+  }
+
+  /**
+   * Register a callback that fires after a successful automatic reconnect.
+   * The callback SHOULD be used to re-read files, refresh UI state, and
+   * re-open FileHandles. Streams and exec sessions are not restored
+   * automatically.
+   */
+  onReconnected(listener: () => void | Promise<void>): () => void {
+    this.reconnectListeners.add(listener);
+    return () => { this.reconnectListeners.delete(listener); };
   }
 
   private async startExecStream(payload: Omit<LuminkaFrame, "id"> & { event: "script_exec_stream" | "shell_exec_stream" }): Promise<ExecStreamResult> {

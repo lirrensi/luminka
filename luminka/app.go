@@ -8,6 +8,8 @@ package luminka
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -62,6 +64,7 @@ type Runtime struct {
 	AppVersion      string
 	Mode            Mode
 	Root            string
+	wsNonce         string
 	RootPolicy      RootPolicy
 	Headless        bool
 	Idle            time.Duration
@@ -150,7 +153,7 @@ func Run(cfg Config) (err error) {
 		return err
 	}
 	rt.ownedLock = true
-	if err = writeInstanceRecord(rt.LockPath, instanceRecord{PID: rt.PID, Port: rt.Port, Mode: rt.Mode}); err != nil {
+	if err = writeInstanceRecord(rt.LockPath, instanceRecord{PID: rt.PID, Port: rt.Port, Mode: rt.Mode, Nonce: rt.wsNonce}); err != nil {
 		return err
 	}
 	rt.logEvent("startup", map[string]any{
@@ -223,6 +226,14 @@ func normalizeConfig(cfg Config) Config {
 	return cfg
 }
 
+func generateNonce() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
 func prepareRuntime(cfg Config) (*Runtime, *lockState, error) {
 	root, err := resolveRootDirectory(cfg.Root, cfg.RootPolicy)
 	if err != nil {
@@ -275,6 +286,14 @@ func prepareRuntime(cfg Config) (*Runtime, *lockState, error) {
 	rt.ScriptBridge = NewScriptBridge(root, cfg.ExecTimeout)
 	rt.ScriptBridge.scriptAssets = cfg.ScriptAssets
 	rt.ShellBridge = NewShellBridge(root, cfg.ExecTimeout)
+
+	if cfg.Mode == ModeWebview {
+		nonce, genErr := generateNonce()
+		if genErr != nil {
+			return nil, nil, fmt.Errorf("generate nonce: %w", genErr)
+		}
+		rt.wsNonce = nonce
+	}
 
 	return rt, nil, nil
 }

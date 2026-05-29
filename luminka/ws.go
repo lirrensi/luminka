@@ -70,8 +70,9 @@ type websocketConn interface {
 }
 
 type wsConnection struct {
-	conn    websocketConn
-	writeMu sync.Mutex
+	conn          websocketConn
+	writeMu       sync.Mutex
+	authenticated bool
 }
 
 func (m wsMessage) MarshalJSON() ([]byte, error) {
@@ -231,7 +232,16 @@ func (rt *Runtime) handleWebSocketSession(wsConn *wsConnection) {
 			continue
 		}
 
+		if rt.Mode == ModeWebview && !wsConn.authenticated && request.Event != "ws_auth" {
+			_ = writeErrorResponse(wsConn, request.ID, "authentication required")
+			rt.logEvent("error", map[string]any{"message": "unauthenticated message rejected"})
+			return
+		}
+
 		switch request.Event {
+		case "ws_auth":
+			_ = rt.handleWSAuth(wsConn, request)
+			continue
 		case "app_info":
 			_ = writeWSMessage(wsConn, wsMessage{
 				Event:           "app_info",
@@ -494,4 +504,30 @@ func boolPtr(v bool) *bool {
 
 func intPtr(v int) *int {
 	return &v
+}
+
+func (rt *Runtime) handleWSAuth(conn *wsConnection, request wsMessage) error {
+	if rt == nil || conn == nil {
+		return nil
+	}
+	if conn.authenticated {
+		_ = writeErrorResponse(conn, request.ID, "already authenticated")
+		return nil
+	}
+	token := request.dataString()
+	if token == "" {
+		rt.logEvent("error", map[string]any{"message": "ws_auth: missing token"})
+		return writeErrorResponse(conn, request.ID, "missing authentication token")
+	}
+	if rt.wsNonce == "" || token != rt.wsNonce {
+		rt.logEvent("error", map[string]any{"message": "ws_auth: invalid token"})
+		return writeErrorResponse(conn, request.ID, "invalid authentication token")
+	}
+	conn.authenticated = true
+	rt.logEvent("ws_auth", map[string]any{"message": "connection authenticated"})
+	return writeWSMessage(conn, wsMessage{
+		Event: "ws_auth_response",
+		ID:    request.ID,
+		Ok:    boolPtr(true),
+	})
 }

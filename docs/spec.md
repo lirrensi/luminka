@@ -818,6 +818,28 @@ Headless mode changes lifecycle behavior but does not make the runtime safer or 
 
 Implementations MUST NOT claim stronger security properties than this model actually provides.
 
+### 20. WebView Nonce Authentication
+
+In webview display profile builds, the runtime MUST generate a cryptographically random nonce at startup and pass it to the frontend through the WebView navigation URL.
+
+The mechanism is:
+
+1. The runtime generates a random nonce before the WebView window opens.
+2. The runtime loads the WebView with the nonce as a query parameter: `http://127.0.0.1:{port}?t={nonce}`.
+3. The frontend SDK reads the nonce from the URL and sends it as the first WebSocket message (`ws_auth`) over the transport.
+4. The runtime verifies the nonce against the generated value.
+5. Only after successful verification are subsequent messages on that connection processed.
+
+The runtime MUST reject any WebSocket message other than `ws_auth` from a webview connection that has not yet authenticated.
+
+The runtime MUST use a cryptographically random nonce of at least 256 bits of entropy.
+
+The nonce MUST NOT be exposed outside the WebView navigation URL and the runtime's in-memory state.
+
+**Security rationale:** The nonce is the proof that the entity on the other end of the WebSocket is the actual WebView instance, because the nonce lived only in the navigation URL — which only the runtime controlled and only the WebView received. A local unprivileged process cannot learn the nonce and therefore cannot authenticate to the WebSocket bridge.
+
+This protection does not apply to browser builds, where the URL (and therefore the nonce) is visible in the address bar and can be copied by the user or enumerated by other local processes. Applications that share secrets between the host runtime and the frontend SHOULD prefer webview builds over browser builds for this reason.
+
 ## References
 
 ### Normative References

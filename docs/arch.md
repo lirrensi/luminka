@@ -277,6 +277,8 @@ Webview responsibilities:
 - record platform window identity when available,
 - own process lifetime through the window lifecycle.
 
+The webview adapter also owns nonce injection. Before navigating the WebView window, the adapter constructs the navigation URL with a cryptographically random nonce query parameter (`?t=<nonce>`). This nonce is the only proof that the WebSocket client is the genuine WebView instance.
+
 Headless responsibilities inside runtime orchestration:
 
 - bypass browser/webview shell opening,
@@ -533,6 +535,7 @@ Key internal relationships:
 | Capability truthfulness | Reported capabilities must match actual behavior. |
 | Thin SDK | SDK improves DX without replacing the canonical protocol. |
 | Broadcast is not state | Runtime broadcast messages are transient coordination events, not persisted application state. |
+| WebView nonce authentication | WebView connections must authenticate via a one-time nonce before any other messages are accepted. |
 
 ## Configuration / Operations
 
@@ -594,6 +597,7 @@ Operational expectations:
 | Subcommand-per-format packaging | Each packaging format (zip, tar, deb, appdir) is its own build CLI subcommand, making it easy to call exactly one in CI without flags | High |
 | Install script templates as repo library | Scripts live in the repo as templates that app developers copy and customize — the framework does not enforce one install model | High |
 | Placeholder-based scripts instead of parameterized | Developers edit the script once per app instead of passing the app name every invocation; simpler to ship in a release artifact | Medium |
+| WebView nonce auth, browser mode skipped | Nonce auth closes the realistic local-attacker gap for webview builds; browser mode address bar visibility makes nonce ineffective there | High |
 
 ## Implementation Pointers
 

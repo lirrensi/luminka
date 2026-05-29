@@ -45,6 +45,13 @@ func localURL(port int) string {
 	return fmt.Sprintf("http://127.0.0.1:%d", port)
 }
 
+func localURLWithNonce(port int, nonce string) string {
+	if nonce == "" {
+		return localURL(port)
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d?t=%s", port, nonce)
+}
+
 func (rt *Runtime) waitForShutdown() error {
 	if rt == nil {
 		return nil
