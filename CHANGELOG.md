@@ -2,6 +2,55 @@
 
 All notable changes to Luminka are documented here.
 
+## [4.0.0] - 2026-05-29
+
+Version 4.0 introduces a consistent event namespace convention, a public
+extension API for Go handlers, and a collection of pre-existing bugfixes.
+All event strings now follow a `namespace:action` pattern, custom Go code can
+intercept or extend any runtime event via `RegisterHandler`, and twelve issues
+spanning TypeScript compilation, filesystem sandbox logic, and SDK error
+messages are resolved. The wire protocol version stays at `"2"`.
+
+### Added
+
+- **Event namespace convention (ADR-0002):** All event strings renamed from
+  underscore convention to `namespace:action` pattern. Request events use
+  `namespace:action` (e.g., `ws:auth`, `file:read_text`), response events use
+  `response:<full-request-event>` (e.g., `response:app:info`), and push events
+  use `namespace:action` (e.g., `stream:chunk`). A complete rename map is
+  documented in `docs/adr/0002-event-namespacing.md`.
+- **Extension API (ADR-0003):** Go `RegisterHandler(event, handler, ...opts)`
+  with `WithOverride()` option for third-party handler registration. Exported
+  types `WSConnection` and `WSMessage` with exported response helpers
+  (`WriteWSMessage`, `WriteWSFrame`, `WriteErrorResponse`, `WriteFSResponse`,
+  etc.). SDK `call()` / `onEvent()` API and `ErrUnhandled` sentinel for
+  fallthrough to built-in dispatch.
+- New `docs/adr/0002-event-namespacing.md` and `docs/adr/0003-extension-api.md`.
+
+### Fixed
+
+- 15 TypeScript compilation errors in `LuminkaClient`: private `request`
+  access changed to `/** @internal */ public request`, missing `offset` /
+  `length` fields in `LuminkaFrame` type, `Uint8Array<ArrayBufferLike>`
+  WebSocket compatibility, and null-safety in event listener closures.
+- 6 filesystem sandbox bugs: CopyFile-to-self no-op guard, Cp circular copy
+  detection, Cp symlink preservation (recreate instead of follow), Delete
+  pre-sanitize symlink detection, AppendFile parent directory creation
+  consistency with WriteBytes, and RemoveAll pre-sanitize symlink guard.
+- `"ws_auth timed out"` error message corrected to `"ws:auth timed out"` in
+  the TypeScript SDK.
+
+### Compatibility
+
+- **Wire protocol**: Protocol version remains `"2"`. Framing, JSON schema,
+  transport, and auth flow are unchanged — only the event vocabulary changed.
+- **Event names have changed in a non-backward-compatible way.** Apps using
+  the Luminka SDK must rebuild against the v4 SDK. Raw WebSocket clients must
+  update event strings to the new `namespace:action` convention.
+- **Go runtime API additions** (`RegisterHandler`, exported types) are
+  additive and backward-compatible. Existing Go code that embeds Luminka
+  compiles without changes.
+
 ## [3.2.0] - 2026-05-22
 
 Version 3.2 is a major filesystem expansion that brings the Luminka SDK to

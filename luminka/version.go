@@ -7,7 +7,7 @@
 package luminka
 
 const (
-	RuntimeVersion    = "3.2.0"
+	RuntimeVersion    = "4.0.0"
 	ProtocolVersion   = "2"
 	defaultAppVersion = "dev"
 )

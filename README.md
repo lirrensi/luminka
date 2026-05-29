@@ -6,7 +6,7 @@
 
 Luminka is a tiny Go runtime for turning a built web app into a portable `.exe`.
 
-Current release: **v3.2.0** — major filesystem expansion bringing full `node:fs/promises` API parity. Your web app now gets proper hands for local files: read, write, move, copy, browse, inspect, watch, truncate, append, and open handles with partial reads, streaming, and line iteration.
+Current release: **v4.0.0** — event namespace convention, extension API, and sandbox hardening. All event strings follow a consistent `namespace:action` pattern, custom Go handlers can intercept or extend any event, and six filesystem sandbox issues are fixed.
 
 It gives you a simple way to ship a web app like a desktop app, without Electron, Tauri, or a heavier framework shell.
 
